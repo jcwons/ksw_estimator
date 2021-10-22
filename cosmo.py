@@ -1,7 +1,7 @@
 import numpy as np
 import camb
 
-def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=2, lSampleBoost=50, lAccuracyBoost=2, verbose=True):
+def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=3, lSampleBoost=50, lAccuracyBoost=3, verbose=True):
     transfer = {}
     cls = {}
 
@@ -13,8 +13,33 @@ def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=2, lSampleBoost=50, lAccura
     pars = camb.CAMBparams()
     pars.set_accuracy(**acc_opts)
 
-    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.06)
-    pars.InitPower.set_params(As=2e-9, ns=0.965, r=0)
+    pars.set_cosmology(H0=67.66,
+                      TCMB=2.7255,
+                      YHe=0.24,
+                      standard_neutrino_neff=True,
+                      ombh2=0.02242,
+                      omch2=0.11933,
+                      tau=0.0561,
+                      mnu=0.06,
+                      omk=0)
+
+    pars.InitPower.set_params(ns=0.9665,
+                     pivot_scalar=0.05,
+                     As=2.1056e-9)
+
+    lmax = max(300, lmax)
+    max_eta_k = k_eta_fac * lmax
+    max_eta_k = max(max_eta_k, 1000)
+
+    pars.max_l = lmax
+    pars.max_l_tensor = lmax
+    pars.max_eta_k = max_eta_k
+    pars.max_eta_k_tensor = max_eta_k
+
+    pars.AccurateBB = True
+    pars.AccurateReionization = True
+    pars.AccuratePolarization = True
+
     pars.set_for_lmax(2500, lens_potential_accuracy=1)
     pars.set_accuracy(lSampleBoost=50)
 

@@ -10,8 +10,7 @@ import sys
 import timeit
 from mpi4py import MPI
 
-path = os.getcwd()
-
+path = os.getcwd()+'/Output'
 
 def get_updated_radii():
     """
@@ -179,7 +178,7 @@ class PreCalc:
             pkl_file = open(beta_file, 'rb')
             recompute_beta = False
         except IOError:
-            print('{} not found'.format(beta_file))
+            self.printmpi('{} not found'.format(beta_file))
             recompute_beta = True
         else:
             self.printmpi('loaded beta from {}'.format(beta_file))
@@ -225,6 +224,8 @@ class PreCalc:
 
         self.printmpi('Compute: beta')
         for lidx, ell in enumerate(ells_sub):
+            if lidx % 10 ==0:
+                self.printmpi(lidx)
             for ridx, radius in enumerate(radii):
                 kr = k * radius
                 # jl[lidx, ridx, :] = spherical_jn(ell, kr)
@@ -265,7 +266,7 @@ class PreCalc:
                     print('root received {}'.format(rank))
                     beta_full[ells_per_rank[rank] - 2, :, :, :] = beta_sub[:, :, :, :]
             beta_full = self.comm.bcast(beta_full, root=0)
-        beta_file = 'beta_{}.pkl'.format(lmax)
+        beta_file = path+'/beta_{}.pkl'.format(lmax)
         with open(beta_file, 'wb') as handle:
             pickle.dump(beta_full, handle, protocol=pickle.HIGHEST_PROTOCOL)
         print('Done: beta')
@@ -297,7 +298,7 @@ class PreCalc:
         idx = 0
         fisher = 0
         self.printmpi('Compute bispectrum')
-        fnl_file = path + 'fnl_lmax.txt'
+        fnl_file = path + '/fnl_lmax.txt'
 
         # Distribute ells for even work load, large ell are slower
         ells_per_rank = []
@@ -385,7 +386,7 @@ class PreCalc:
                     #print('root received fisher{}'.format(rank))
                     fisher_full[ells_per_rank[rank] - 2] = fisher_sub
             fisher_full = self.comm.bcast(fisher_full, root=0)
-        fisher_file = 'fisher_{}.pkl'.format(ells.size+1)
+        fisher_file = path + '/fisher_{}.pkl'.format(ells.size+1)
         with open(fisher_file, 'wb') as handle:
             pickle.dump(fisher_full, handle, protocol=pickle.HIGHEST_PROTOCOL)
         self.printmpi('Done: fisher')
@@ -402,7 +403,7 @@ class PreCalc:
 
 
 F = PreCalc()
-F.init_cosmo(lmax=1100)  # Actually only calculates to lmax - 100
+F.init_cosmo(lmax=200)  # Actually only calculates to lmax - 100
 start = timeit.default_timer()
 F.init_beta()
 F.init_bispec()
