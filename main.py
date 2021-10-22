@@ -146,12 +146,18 @@ class PreCalc:
 
         norm = (3/5)^2 * As * 2 * pi^2 /k_p^3
         """
-        norm = np.sqrt(6.234181826176155e-15)  # Need to update this part
+        scalar_amp = 2.1056e-9 #amplitude of scalar perturbations
+        # Amplitude is still no correct I guess. Don't know where the 2pi^2 comes from. Adriaan uses 4pi^2
+        # I think there should be a (3/5)^2 from conversion from R to Phi in the curvature perturbations
+        norm = 2 * np.pi**2 * scalar_amp  # Not sure where the 2pi^2 comes from.
+
         kpivot = 0.05
         ns = 0.965
+
         if k is None:
             k = self.cosmo['scalar']['k']
         km3 = k ** -3
+        # Multiply the power spectrum to is As * (k/kp)^(n_s-1)
         km3 *= (k / kpivot) ** (ns - 1)
         beta_prim = km3 * norm
         return beta_prim
