@@ -1,7 +1,7 @@
 import numpy as np
 import camb
 
-def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=3, lSampleBoost=50, lAccuracyBoost=3, verbose=True):
+def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=2, lSampleBoost=50, lAccuracyBoost=2, verbose=True):
     transfer = {}
     cls = {}
 
@@ -29,7 +29,7 @@ def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=3, lSampleBoost=50, lAccura
 
     lmax = max(300, lmax)
     max_eta_k = k_eta_fac * lmax
-    max_eta_k = max(max_eta_k, 1000)
+    max_eta_k = max(max_eta_k, 50000)
 
     pars.max_l = lmax
     pars.max_l_tensor = lmax
@@ -40,15 +40,11 @@ def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=3, lSampleBoost=50, lAccura
     pars.AccurateReionization = True
     pars.AccuratePolarization = True
 
-    pars.set_for_lmax(2500, lens_potential_accuracy=1)
+    pars.set_for_lmax(2500, lens_potential_accuracy=3)
     pars.set_accuracy(lSampleBoost=50)
 
     pars.max_l = lmax
     pars.max_eta_k = k_eta_fac * lmax
-
-    pars.AccurateBB = True
-    pars.AccurateReionization = True
-    pars.AccuratePolarization = True
 
     # calculate results for these parameters
 
@@ -56,7 +52,10 @@ def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=3, lSampleBoost=50, lAccura
     transfer_s = data.get_cmb_transfer_data('scalar')
 
     data.calc_power_spectra()
-    cls_camb = data.get_cmb_power_spectra(lmax=None, CMB_unit='muK',raw_cl=True)
+    cls_camb = data.get_cmb_power_spectra(lmax=None, raw_cl=True, CMB_unit='muK')
+
+    print(cls_camb['total'].shape, 'cls after')
+    print(transfer_s.delta_p_l_k.shape, 'transfer_plk')
     for key in cls_camb:
         cls_cm = cls_camb[key]
         n_ell, n_pol = cls_cm.shape
@@ -82,8 +81,9 @@ def run_camb(lmax=2500, k_eta_fac=2.5, AccuracyBoost=3, lSampleBoost=50, lAccura
 
     transfer_s.delta_p_l_k[1, ...] *= prefactor[:, np.newaxis]
     transfer_s.delta_p_l_k *= (pars.TCMB * 1e6)
-
-
+    #print(pars.TCMB * 1e6)
+    print(cls['cls']['total'].shape, 'cls after')
+    print(transfer_s.delta_p_l_k.shape, 'transfer_plk')
     transfer['scalar'] = transfer_s.delta_p_l_k
     transfer['k'] = transfer_s.q
     transfer['ells'] = ells  # sparse and might differ from cls['ells']
