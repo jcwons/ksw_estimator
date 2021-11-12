@@ -2,6 +2,7 @@ import numpy as np
 import cosmo as cs
 from scipy.special import spherical_jn
 from scipy.integrate import trapz
+from scipy.linalg import inv
 import pywigxjpf as wig
 import pickle
 import os
@@ -12,6 +13,31 @@ import timeit
 from mpi4py import MPI
 
 path = os.getcwd() + '/Output'
+
+def init_pol_triplets(pol_opts):
+    """
+    initialise array with polarisation triplets
+    So far only includes T=0 and E=1
+    :return:
+    """
+    if pol_opts == 0:
+        pol_trpl = np.zeros((1, 3), dtype=int)
+        pol_trpl[0] = 0, 0, 0
+    elif pol_opts == 1:
+        pol_trpl = np.zeros((1, 3), dtype=int)
+        pol_trpl[0] = 1, 1, 1
+    elif pol_opts == 2:
+        pol_trpl = np.zeros((8, 3), dtype=int)
+        pol_trpl[0] = 0, 0, 0
+        pol_trpl[1] = 1, 1, 1
+        pol_trpl[2] = 0, 0, 1
+        pol_trpl[3] = 0, 1, 0
+        pol_trpl[4] = 1, 0, 0
+        pol_trpl[5] = 0, 1, 1
+        pol_trpl[6] = 1, 0, 1
+        pol_trpl[7] = 1, 1, 0
+
+    return(pol_trpl)
 
 
 def get_updated_radii():
@@ -60,6 +86,29 @@ def delta_l1l2l3(ell1, ell2, ell3):
         delta = 1
     return delta
 
+def local_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3):
+    shape_func =  beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 0, :] \
+                + beta_s[ell2 - l_min, pidx1, 1, :] * beta_s[ell3 - l_min, pidx2, 1, :] * beta_s[ell1 - l_min, pidx3, 0, :] \
+                + beta_s[ell3 - l_min, pidx1, 1, :] * beta_s[ell1 - l_min, pidx2, 1, :] * beta_s[ell2 - l_min, pidx3, 0, :]
+    return shape_func
+
+def equil_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3):
+    shape_func = - local_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3)
+    # delta delta delta
+    shape_func -= beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 3, :]
+    # beta gamma delta
+    shape_func += beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 2, :] * beta_s[ell3 - l_min, pidx3, 3, :]
+    # bdg
+    shape_func += beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 2, :]
+    # gbd
+    shape_func += beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 2, :]
+    # dgb
+    shape_func += beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 2, :] * beta_s[ell3 - l_min, pidx3, 1, :]
+    # gbd
+    shape_func += beta_s[ell1 - l_min, pidx1, 2, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 3, :]
+    # gdb
+    shape_func += beta_s[ell1 - l_min, pidx1, 2, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 1, :]
+    return shape_func
 
 class PreCalc:
     def __init__(self):
@@ -152,6 +201,46 @@ class PreCalc:
         #k / kpivot) ** (ns - 1)
         beta_prim = km3 * norm
         return beta_prim
+
+    def gamma_prim(self, k):
+            """
+            Returns shape function
+                        beta = norm * (k/k_pivot)^(ns-4)
+
+            norm = (3/5)^1/2 * As * 2 * pi^2 /k_p^3
+            for scalar scalar tensor, the 3/5 factor gets replaced by a 2. Tensor perturbations are gauge invariant so no
+            3/5. And probably comes with a 2 due to +,x components
+            """
+            kpivot = 0.05
+            ns = 0.965
+
+            if k is None:
+                k = self.cosmo['scalar']['k']
+            km3 = k ** -3
+            # Multiply the power spectrum scaling: (k/kp)^(n_s-1)
+            km3 *= (k / kpivot) ** (ns - 1)
+            gamma_prim = km3 ** (1 / 3)
+            return gamma_prim
+
+    def delta_prim(self, k):
+            """
+            Returns shape function
+                        beta = norm * (k/k_pivot)^(ns-4)
+
+            norm = (3/5)^1/2 * As * 2 * pi^2 /k_p^3
+            for scalar scalar tensor, the 3/5 factor gets replaced by a 2. Tensor perturbations are gauge invariant so no
+            3/5. And probably comes with a 2 due to +,x components
+            """
+            kpivot = 0.05
+            ns = 0.965
+
+            if k is None:
+                k = self.cosmo['scalar']['k']
+            km3 = k ** -3
+            # Multiply the power spectrum scaling: (k/kp)^(n_s-1)
+            km3 *= (k / kpivot) ** (ns - 1)
+            delta_prim = km3 ** (2 / 3)
+            return delta_prim
 
     def init_beta(self, prim_shape='local'):
         """
@@ -270,7 +359,7 @@ class PreCalc:
 
         self.beta['beta_s'] = beta_full
 
-    def init_bispec(self):
+    def init_bispec(self, shape='local'):
         """
         Calculate the bispectrum
         """
@@ -283,16 +372,34 @@ class PreCalc:
         ells = np.array(ells, dtype='int64')
 
 
-        self.compute_bispec(ells=ells, beta_s=beta_s, radii=radii, cls_lensed=cls_lensed)
+        self.compute_bispec(ells=ells, beta_s=beta_s, radii=radii, cls_lensed=cls_lensed, shape=shape)
         sys.stdout.flush()
         # pol_trpl = np.array(list(itertools.product([0, 1], repeat=3)))  # all combinations of TTT,TTE,...
 
-    def compute_bispec(self, ells, beta_s, radii, cls_lensed):
-        r2 = radii ** 2
-        pol_trpl = np.array([[0, 0, 0], [1, 1, 1]])
+    def invert_cls(self, ells, cls, pol_opts):
+        cov = np.zeros((ells.size, 2, 2))
+        invcov = np.zeros_like(cov)
+        if pol_opts == 0:
+            cov[:, 0, 0] = cls[0, :]
+            cov[:, 1, 1] = cls[0, :]
+            for lidx in range(ells.size):
+                invcov[lidx,:,:] = inv(cov[lidx,:,:])
+        elif pol_opts == 1:
+            cov[:, 0, 0] = cls[1, :]
+            cov[:, 1, 1] = cls[1, :]
+            for lidx in range(ells.size):
+                invcov[lidx, :, :] = inv(cov[lidx, :, :])
+        elif pol_opts == 2:
+            cov[:,0,0] = cls[0,:]
+            cov[:,1,1] = cls[1,:]
+            cov[:,1,0] = cls[3,:]
+            cov[:,0,1] = -cls[3,:]
+            for lidx in range(ells.size):
+                invcov[lidx,:,:] = inv(cov[lidx,:,:])
+        return invcov
 
+    def compute_bispec(self, ells, beta_s, radii, cls_lensed, shape):
         # shape_factor depends on primordial template, i.e. 2 for local, 6 for others
-        shape_factor = 2
         fisher_lmax = np.zeros(ells.size)
         self.printmpi('Compute bispectrum')
         fnl_file = path + '/fnl_lmax.txt'
@@ -304,12 +411,21 @@ class PreCalc:
         for rank in range(self.mpi_size):
             ells_per_rank.append(ells[rank::self.mpi_size])
         # temporary beta will be combined with all ranks later
+
         fisher_sub = np.zeros((ells_sub.size))
+        pol_opts = 2 #0: T only, 1: E only, 2: TE mixed
+        pol_trpl = init_pol_triplets(pol_opts)
+        invcov = self.invert_cls(ells, cls_lensed, pol_opts)
+        # pol_trpl = init_pol_triplets(0)
         # Calculation performed in Cython. See bispectrum.pyx
+<<<<<<< HEAD
         bispectrum.compute_bispec(ells_sub, radii, beta_s, cls_lensed, fisher_sub, self.mpi_rank)
+=======
+        bispectrum.compute_bispec(ells_sub, radii, beta_s, invcov, fisher_sub, pol_trpl, self.mpi_rank, shape)
+
+>>>>>>> be3a9d457fcc2ce53c61fdca423959fa91cbd529
         # fisher has been calculated at all ranks
         fisher_full = fisher_sub
-
         if self.mpi_size > 1:
             if self.mpi_rank == 0:
                 print('Combining fisher')
@@ -346,7 +462,7 @@ class PreCalc:
             fnl_max[idx] = item + fnl_max[idx - 1]
         fnl_max = 1 / np.sqrt(fnl_max)
         self.printmpi(fnl_end)
-        np.savetxt(fnl_file, (fnl_max, ells))
+        np.savetxt(fnl_file, np.column_stack([ells, fnl_max]))
 
 
 F = PreCalc()
