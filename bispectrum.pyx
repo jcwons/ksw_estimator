@@ -12,10 +12,34 @@ cimport numpy as np
 cdef double pi = math.pi
 
 
-#cdef double[:] array_mul(double[:] A, double [:] B):
-##    cdef int i
-#    for i in range(np.size(A))
-#        double[i]
+cdef local_shape(np.ndarray[double,ndim=4] beta_s, long long ell1, long long ell2, long long ell3, int l_min, int pidx1, int pidx2, int pidx3, np.ndarray[double,ndim=1] shape_func):
+    shape_func =  beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 0, :] \
+                + beta_s[ell2 - l_min, pidx1, 1, :] * beta_s[ell3 - l_min, pidx2, 1, :] * beta_s[ell1 - l_min, pidx3, 0, :] \
+                + beta_s[ell3 - l_min, pidx1, 1, :] * beta_s[ell1 - l_min, pidx2, 1, :] * beta_s[ell2 - l_min, pidx3, 0, :]
+    shape_func = 2 * shape_func
+    return shape_func
+
+cdef equil_shape(np.ndarray[double,ndim=4] beta_s, long long ell1, long long ell2, long long ell3, int l_min, int pidx1, int pidx2, int pidx3, np.ndarray[double,ndim=1] shape_func):
+    shape_func = -beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 0, :] \
+                - beta_s[ell2 - l_min, pidx1, 1, :] * beta_s[ell3 - l_min, pidx2, 1, :] * beta_s[ell1 - l_min, pidx3, 0, :] \
+                - beta_s[ell3 - l_min, pidx1, 1, :] * beta_s[ell1 - l_min, pidx2, 1, :] * beta_s[ell2 - l_min, pidx3, 0, :]
+    # delta delta delta
+    shape_func -= beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 3, :]
+    # beta gamma delta
+    shape_func += beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 2, :] * beta_s[ell3 - l_min, pidx3, 3, :]
+    # bdg
+    shape_func += beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 2, :]
+    # gbd
+    shape_func += beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 2, :]
+    # dgb
+    shape_func += beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 2, :] * beta_s[ell3 - l_min, pidx3, 1, :]
+    # gbd
+    shape_func += beta_s[ell1 - l_min, pidx1, 2, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 3, :]
+    # gdb
+    shape_func += beta_s[ell1 - l_min, pidx1, 2, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 1, :]
+    shape_func = 6 * shape_func
+    return shape_func
+
 
 cdef int delta_l1l2l3(int ell1, int ell2, int ell3):
     """
@@ -33,131 +57,67 @@ cdef int delta_l1l2l3(int ell1, int ell2, int ell3):
     return delta
 
 
-def compute_bispec(ells, radii, beta_s, cls_lensed, fisher_sub):
+def compute_bispec(ells, radii, beta_s, invcov, fisher_sub, pol_trpl, rank, shape):
     # ells are either all ells or in case of paralellising a sub set
     # radii are computed in main.py
     r2 = radii**2
-
-
-
-    # beta_s = cosmo.
     shape_func = np.zeros_like(radii)
-    bprim = np.zeros_like(radii)
-    #fisher_lmax = np.zeros(ells.size, dtype= 'float64')
-    #fisher_sub = np.zeros(ells.size, dtype= 'float64')
-    compute_bispec_worker(ells, radii, r2, beta_s, cls_lensed, shape_func, bprim, fisher_sub)
-    #self.printmpi('Compute bispectrum')
-    #fnl_file = path + '/fnl_lmax.txt'
+    if shape == 'local':
+        shape_temp = 0
+    else:
+        shape_temp = 1
+    compute_bispec_worker(ells, radii, r2, beta_s, invcov, shape_func, fisher_sub, pol_trpl, rank, shape_temp)
     return fisher_sub
 
 
 
 @cython.wraparound(False)
 @cython.boundscheck(False)
-cdef compute_bispec_worker(np.ndarray[long long,ndim=1] ells, np.ndarray[double,ndim=1] radii, np.ndarray[double,ndim=1] r2, np.ndarray[double,ndim=4] beta_s, np.ndarray[double,ndim=2] cls_lensed, np.ndarray[double,ndim=1] shape_func, np.ndarray[double,ndim=1] bprim, np.ndarray[double,ndim=1] fisher_sub):
-    cdef int shape_factor, lidx3, ell3, ell2, ell1, l_min, pidx1, pidx2, pidx3
-    cdef double gaunt, wig3f, fis, fisher, fourpi
+cdef compute_bispec_worker(np.ndarray[long long,ndim=1] ells, np.ndarray[double,ndim=1] radii, np.ndarray[double,ndim=1] r2, np.ndarray[double,ndim=4] beta_s, np.ndarray[double,ndim=3] invcls, np.ndarray[double,ndim=1] shape_func, np.ndarray[double,ndim=1] fisher_sub, np.ndarray[int,ndim=2] pol_trpl, int rank, int shape_temp):
+    cdef long long ell3, ell2, ell1
+    cdef int shape_factor, lidx3, l_min, pidx1, pidx2, pidx3, pidx4, pidx5, pidx6
+    cdef double gaunt, wig3f, fis, fisher, fourpi, bispec1, bispec2 
      
     fourpi = 4 * pi
     shape_factor = 2
     l_min = 2
-    pidx1, pidx2, pidx3 = [0,0,0]
     #wigner from the library
+
+    # pol_trp
     lidx3=0
     for ell3 in ells:
         fisher = 0 
-        #if lidx3 % 10 == 0: 
-            #print(lidx3)
+        if rank == 0: 
+            print('lmax:', lidx3+2)#, flush=True)
         for ell2 in range(2, ell3 + 1):
             for ell1 in range(2, ell2 + 1):
                 # Wig3j is only non-zero for even sums of ell and triangle equation
                 if ((ell3 + ell2 + ell1) % 2) == 1 or ell3 > ell1 + ell2:
                     continue
-                # for pidx in range(pol_trpl.shape[0]):
-                #pidx1, pidx2, pidx3 = [1,1,1]
-                gaunt = np.sqrt((2 * ell1 + 1) * (2 * ell2 + 1) * (2 * ell3 + 1) / fourpi) *  wig.wig3jj(2 * ell1, 2 * ell2, 2 * ell3, 0, 0, 0)
-                shape_func = beta_s[ell1-l_min, pidx1, 1, :] * beta_s[ell2-l_min, pidx2, 1, :] * beta_s[ell3-l_min, pidx3, 0, :] \
-                                + beta_s[ell2-l_min, pidx1, 1, :] * beta_s[ell3-l_min, pidx2, 1, :] * beta_s[ell1-l_min, pidx3, 0, :] \
-                                + beta_s[ell3-l_min, pidx1, 1, :] * beta_s[ell1-l_min, pidx2, 1, :] * beta_s[ell2-l_min, pidx3, 0, :]
-                bprim = shape_factor * gaunt * shape_func * r2
-                #integrand = bprim* r2 
-                bispec = np.trapz(bprim, radii)
-                fis = bispec
-                fis /= (cls_lensed[pidx1, ell1-l_min] * cls_lensed[pidx2, ell2-l_min] *
-                        cls_lensed[pidx3, ell3-l_min])
-                fis /= delta_l1l2l3(ell3, ell2, ell1)
-                fis *= bispec   
-                fisher += fis
+                for pidx3, pidx2, pidx1 in pol_trpl:
+                    gaunt = (2 * ell1 + 1) * (2 * ell2 + 1) * (2 * ell3 + 1) / fourpi *  wig.wig3jj(2 * ell1, 2 * ell2, 2 * ell3, 0, 0, 0)**2
+                    # local shape (beta beta alpha + 2 perm)
+                    if shape_temp == 0:
+                        shape_func = local_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3, shape_func)
+                    else:
+                        shape_func = equil_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3, shape_func)
+                    # calculate the B_(l1,l2,l3)^(X1,X2,X3) and multiply angular factor squared
+                    bispec1 = np.trapz(shape_func * r2, radii)
+                    bispec1 *= gaunt  
+                    for pidx6, pidx5, pidx4 in pol_trpl:
+                        if shape_temp == 0:
+                            shape_func = local_shape(beta_s, ell1, ell2, ell3, l_min, pidx4, pidx5, pidx6, shape_func)
+                        else:
+                            shape_func = equil_shape(beta_s, ell1, ell2, ell3, l_min, pidx4, pidx5, pidx6, shape_func)
+                        # calculate  B_(l1,l2,l3)^(X4,X5,X6)
+                        bispec2 = np.trapz(shape_func*r2, radii)
+                        fis = bispec1 * bispec2
+                        
+                        fis *= (invcls[ell1-l_min, pidx1, pidx4] * invcls[ell2-l_min, pidx2, pidx5] *
+                                invcls[ell3-l_min, pidx3, pidx6])
+                        fis /= delta_l1l2l3(ell3, ell2, ell1) 
+
+                        fisher += fis
         fisher_sub[lidx3] = fisher
         lidx3 +=1
     return fisher_sub
-    #fisher_full = fisher_sub
-    #fnl_max = np.zeros_like(fisher_full)
-    #for idx, item in enumerate(fisher_full):
-    #    fnl_max[idx] = item + fnl_max[idx-1]
-    #fnl_max = 1 / np.sqrt(fnl_max)
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    ''' 
-    if self.mpi_size > 1:
-        if self.mpi_rank == 0:
-            print('Combining fisher')
-            fisher_full = np.zeros(ells.size)
-            # Place root fisher_sub in fisher_full
-            fisher_full[ells_per_rank[0] - 2] = fisher_sub
-        else:
-            fisher = None
-
-        for rank in range(1, self.mpi_size):
-            # Send fisher from other ranks over to root
-            if self.mpi_rank == rank:
-                self.comm.Send(fisher_sub, dest=0, tag=rank)
-                #print(self.mpi_rank, 'sent')
-
-            # Receive fisher on root
-            if self.mpi_rank == 0:
-                ell_size = ells_per_rank[rank].size
-                fisher_sub = np.zeros(ell_size)
-                self.comm.Recv(fisher_sub, source=rank, tag=rank)
-                #print('root received fisher{}'.format(rank))
-                fisher_full[ells_per_rank[rank] - 2] = fisher_sub
-        fisher_full = self.comm.bcast(fisher_full, root=0)
-    fisher_file = path + '/fisher_{}.pkl'.format(ells.size+1)
-    with open(fisher_file, 'wb') as handle:
-        pickle.dump(fisher_full, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    self.printmpi('Done: fisher')
-    
-
-    fnl_end = np.sum(fisher_full)
-    fnl_end = 1/np.sqrt(fnl_end)
-
-    fnl_max = np.zeros_like(fisher_full)
-    for idx, item in enumerate(fisher_full):
-        fnl_max[idx] = item + fnl_max[idx-1]
-    fnl_max = 1 / np.sqrt(fnl_max)
-    self.printmpi(fnl_end)
-    np.savetxt(fnl_file, (fnl_max, ells))
-    '''

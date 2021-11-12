@@ -81,7 +81,7 @@ def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=2, lSampleBoost=50, lAccuracy
 
     transfer_s.delta_p_l_k[1, ...] *= prefactor[:, np.newaxis]
     transfer_s.delta_p_l_k *= (pars.TCMB * 1e6)
-    #print(pars.TCMB * 1e6)
+
     print(cls['cls']['total'].shape, 'cls after')
     print(transfer_s.delta_p_l_k.shape, 'transfer_plk')
     transfer['scalar'] = transfer_s.delta_p_l_k
