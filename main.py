@@ -266,7 +266,7 @@ class PreCalc:
         beta_file = path + '/beta_{}.pkl'.format(lmax)
         with open(beta_file, 'wb') as handle:
             pickle.dump(beta_full, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        print('Done: beta')
+        self.printmpi('Done: beta')
 
         self.beta['beta_s'] = beta_full
 
@@ -306,8 +306,7 @@ class PreCalc:
         # temporary beta will be combined with all ranks later
         fisher_sub = np.zeros((ells_sub.size))
         # Calculation performed in Cython. See bispectrum.pyx
-        bispectrum.compute_bispec(ells_sub, radii, beta_s, cls_lensed, fisher_sub)
-
+        bispectrum.compute_bispec(ells_sub, radii, beta_s, cls_lensed, fisher_sub, self.mpi_rank)
         # fisher has been calculated at all ranks
         fisher_full = fisher_sub
 
@@ -324,7 +323,7 @@ class PreCalc:
                 # Send fisher from other ranks over to root
                 if self.mpi_rank == rank:
                     self.comm.Send(fisher_sub, dest=0, tag=rank)
-                    # print(self.mpi_rank, 'sent')
+                    print(self.mpi_rank, 'sent')
 
                 # Receive fisher on root
                 if self.mpi_rank == 0:

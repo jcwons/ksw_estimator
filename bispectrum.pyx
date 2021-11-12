@@ -1,5 +1,5 @@
 import pywigxjpf as wig
-import pythran
+#import pythran
 cimport cython 
 from cython.parallel import parallel, prange
 
@@ -33,7 +33,7 @@ cdef int delta_l1l2l3(int ell1, int ell2, int ell3):
     return delta
 
 
-def compute_bispec(ells, radii, beta_s, cls_lensed, fisher_sub):
+def compute_bispec(ells, radii, beta_s, cls_lensed, fisher_sub, rank):
     # ells are either all ells or in case of paralellising a sub set
     # radii are computed in main.py
     r2 = radii**2
@@ -45,7 +45,7 @@ def compute_bispec(ells, radii, beta_s, cls_lensed, fisher_sub):
     bprim = np.zeros_like(radii)
     #fisher_lmax = np.zeros(ells.size, dtype= 'float64')
     #fisher_sub = np.zeros(ells.size, dtype= 'float64')
-    compute_bispec_worker(ells, radii, r2, beta_s, cls_lensed, shape_func, bprim, fisher_sub)
+    compute_bispec_worker(ells, radii, r2, beta_s, cls_lensed, shape_func, bprim, fisher_sub, rank)
     #self.printmpi('Compute bispectrum')
     #fnl_file = path + '/fnl_lmax.txt'
     return fisher_sub
@@ -54,8 +54,9 @@ def compute_bispec(ells, radii, beta_s, cls_lensed, fisher_sub):
 
 @cython.wraparound(False)
 @cython.boundscheck(False)
-cdef compute_bispec_worker(np.ndarray[long long,ndim=1] ells, np.ndarray[double,ndim=1] radii, np.ndarray[double,ndim=1] r2, np.ndarray[double,ndim=4] beta_s, np.ndarray[double,ndim=2] cls_lensed, np.ndarray[double,ndim=1] shape_func, np.ndarray[double,ndim=1] bprim, np.ndarray[double,ndim=1] fisher_sub):
-    cdef int shape_factor, lidx3, ell3, ell2, ell1, l_min, pidx1, pidx2, pidx3
+cdef compute_bispec_worker(np.ndarray[long long,ndim=1] ells, np.ndarray[double,ndim=1] radii, np.ndarray[double,ndim=1] r2, np.ndarray[double,ndim=4] beta_s, np.ndarray[double,ndim=2] cls_lensed, np.ndarray[double,ndim=1] shape_func, np.ndarray[double,ndim=1] bprim, np.ndarray[double,ndim=1] fisher_sub, int rank):
+    cdef long long ell3, ell2, ell1
+    cdef int shape_factor, lidx3, l_min, pidx1, pidx2, pidx3
     cdef double gaunt, wig3f, fis, fisher, fourpi
      
     fourpi = 4 * pi
@@ -66,8 +67,8 @@ cdef compute_bispec_worker(np.ndarray[long long,ndim=1] ells, np.ndarray[double,
     lidx3=0
     for ell3 in ells:
         fisher = 0 
-        #if lidx3 % 10 == 0: 
-            #print(lidx3)
+        if rank == 0:        
+            print(lidx3)
         for ell2 in range(2, ell3 + 1):
             for ell1 in range(2, ell2 + 1):
                 # Wig3j is only non-zero for even sums of ell and triangle equation
