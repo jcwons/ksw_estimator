@@ -1,7 +1,8 @@
 import numpy as np
 import camb
+from camb import model
 
-def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=2, lSampleBoost=50, lAccuracyBoost=2, verbose=True):
+def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracyBoost=5, verbose=True):
     transfer = {}
     cls = {}
 
@@ -27,7 +28,11 @@ def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=2, lSampleBoost=50, lAccuracy
                      pivot_scalar=0.05,
                      As=2.1056e-9)
 
+    pars.set_dark_energy()
+    pars.NonLinear = model.NonLinear_none
+
     lmax = max(300, lmax)
+
     max_eta_k = k_eta_fac * lmax
     max_eta_k = max(max_eta_k, 50000)
 
@@ -35,21 +40,21 @@ def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=2, lSampleBoost=50, lAccuracy
     pars.max_l_tensor = lmax
     pars.max_eta_k = max_eta_k
     pars.max_eta_k_tensor = max_eta_k
+    pars.max_l_evolve = lmax + 300
 
     pars.AccurateBB = True
     pars.AccurateReionization = True
     pars.AccuratePolarization = True
 
-    pars.set_for_lmax(2500, lens_potential_accuracy=3)
-    pars.set_accuracy(lSampleBoost=50)
+    #pars.set_for_lmax(2500, lens_potential_accuracy=3)
 
-    pars.max_l = lmax
-    pars.max_eta_k = k_eta_fac * lmax
 
     # calculate results for these parameters
 
     data = camb.get_transfer_functions(pars)
     transfer_s = data.get_cmb_transfer_data('scalar')
+    print(transfer_s.q.shape)
+    #print(camb.get_transfer_functions(pars).get_cmb_transfer_data('scalar').q.shape)
 
     data.calc_power_spectra()
     cls_camb = data.get_cmb_power_spectra(lmax=None, raw_cl=True, CMB_unit='muK')
@@ -82,8 +87,6 @@ def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=2, lSampleBoost=50, lAccuracy
     transfer_s.delta_p_l_k[1, ...] *= prefactor[:, np.newaxis]
     transfer_s.delta_p_l_k *= (pars.TCMB * 1e6)
 
-    print(cls['cls']['total'].shape, 'cls after')
-    print(transfer_s.delta_p_l_k.shape, 'transfer_plk')
     transfer['scalar'] = transfer_s.delta_p_l_k
     transfer['k'] = transfer_s.q
     transfer['ells'] = ells  # sparse and might differ from cls['ells']
