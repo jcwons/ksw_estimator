@@ -1,11 +1,3 @@
-# get delta_v_zlk
-# for each bin call get_transfer_bin
-# Generate z_samples --> split z_samples between cores
-# Loop over ell and z to get all delta_v_zlk
-# sum up different z's for each ell --> combine delta_v_zlk of each core
-
-
-
 import numpy as np
 from scipy import special
 import camb
@@ -156,7 +148,7 @@ def get_transfer_bin(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, k, ells, d
 
     return delta_v_lk
 
-def run_camb(lmax=300, k_eta_fac=10, AccuracyBoost=4, lSampleBoost=50, lAccuracyBoost=7, ze=np.array([1, 2]), k_acc=1):
+def run_camb_ksz(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccuracyBoost=7, ze=np.array([1, 2]), k_acc=2, k_arr=None, N_bins=2):
     print(AccuracyBoost,lAccuracyBoost,k_acc)
     transfer_ksz = {}
         # Initialising CAMB with Planck 2018 Cosmology
@@ -168,9 +160,6 @@ def run_camb(lmax=300, k_eta_fac=10, AccuracyBoost=4, lSampleBoost=50, lAccuracy
                     DoLateRadTruncation=False)
 
     pars = camb.CAMBparams()
-    pars.Accuracy.IntkAccuracyBoost = k_acc * AccuracyBoost
-    pars.Accuracy.SourcekAccuracyBoost =k_acc * AccuracyBoost
-
     pars.set_cosmology(H0=67.66,
                        TCMB=2.7255,
                        YHe=0.24,
@@ -184,30 +173,18 @@ def run_camb(lmax=300, k_eta_fac=10, AccuracyBoost=4, lSampleBoost=50, lAccuracy
                               pivot_scalar=0.05,
                               As=2.1056e-9)
 
+    '''
     if MPI_rank == 0:
         print('Getting the ks',flush=True)
         k = camb.get_transfer_functions(pars).get_cmb_transfer_data('scalar').q
-        ksize = np.array(k.size, dtype=np.int)
+        ksize = np.array(k.size, dtype=np.int32)
     else:
-        ksize=np.zeros(1, dtype=np.int)
-
-    pars.Accuracy.IntkAccuracyBoost = k_acc
+        ksize=np.zeros(1, dtype=np.int32)
+    '''    
     pars.Accuracy.SourcekAccuracyBoost =k_acc
+    pars.Accuracy.IntkAccuracyBoost = k_acc
  
     pars.set_accuracy(**acc_opts)
-
-    pars.set_cosmology(H0=67.66,
-                       TCMB=2.7255,
-                       YHe=0.24,
-                       standard_neutrino_neff=True,
-                       ombh2=0.02242,
-                       omch2=0.11933,
-                       tau=0.0561,
-                       mnu=0.06,
-                       omk=0)
-    pars.InitPower.set_params(ns=0.9665,
-                              pivot_scalar=0.05,
-                              As=2.1056e-9)
     pars.set_dark_energy()
     pars.NonLinear = model.NonLinear_none
 
@@ -221,20 +198,6 @@ def run_camb(lmax=300, k_eta_fac=10, AccuracyBoost=4, lSampleBoost=50, lAccuracy
     pars.AccurateBB = True
     pars.AccurateReionization = True
     pars.AccuratePolarization = True
-
- 
-#    if MPI_rank == 0:
-#        print('Getting the ks',flush=True)
-#        k = camb.get_transfer_functions(pars).get_cmb_transfer_data('scalar').q
-#        ksize = np.array(k.size, dtype=np.int)
-#    else:
-#        ksize=np.zeros(1, dtype=np.int)
-    comm.Barrier()
-    comm.Bcast(ksize, root=0)
-    if MPI_rank != 0:
-        k = np.zeros(ksize, dtype='d')
-    comm.Bcast([k,MPI.DOUBLE], root=0)
-    comm.Barrier()
 
     #Increase lmax to improve fit for ells close to lmax
     pars.set_for_lmax(7000)
@@ -253,7 +216,8 @@ def run_camb(lmax=300, k_eta_fac=10, AccuracyBoost=4, lSampleBoost=50, lAccuracy
 
     z_min = 0.2
     z_max = 2
-    N_bins = 2
+# is now input from os
+#    N_bins = 4
     N_samples_in_bin = 120
 
     delta_v_zlk = np.zeros([N_bins, ells.size, k.size])
@@ -266,33 +230,140 @@ def run_camb(lmax=300, k_eta_fac=10, AccuracyBoost=4, lSampleBoost=50, lAccuracy
     transfer_ksz['k'] = k
     transfer_ksz['redshift'] = ze
     transfer_ksz['ells'] = ells
-    tag = './Output/ksz_300_ac_{}_{}_k{}.pkl'.format(AccuracyBoost, lAccuracyBoost, k_acc)
+    tag = './Output/ksz_300_b{}_ac_{}_{}_k{}.pkl'.format(N_bins, AccuracyBoost, lAccuracyBoost, k_acc)
     if MPI_rank == 0:
         with open(tag, 'wb') as handle:
             pickle.dump(transfer_ksz, handle,
                         protocol=pickle.HIGHEST_PROTOCOL)
+    
     return transfer_ksz
 
-comm = MPI.COMM_WORLD
-MPI_size = comm.Get_size()
-MPI_rank = comm.Get_rank()
-'''
+def run_camb_cosmo(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccuracyBoost=7, k_acc=2, verbose=True):
+    transfer = {}
+    cls = {}
+
+    acc_opts = dict(AccuracyBoost=AccuracyBoost,
+                    lSampleBoost=lSampleBoost,
+                    lAccuracyBoost=lAccuracyBoost,
+                    DoLateRadTruncation=False)
+
+    pars = camb.CAMBparams()
+    pars.set_accuracy(**acc_opts)
+
+    pars.set_cosmology(H0=67.66,
+                       TCMB=2.7255,
+                       YHe=0.24,
+                       standard_neutrino_neff=True,
+                       ombh2=0.02242,
+                       omch2=0.11933,
+                       tau=0.0561,
+                       mnu=0.06,
+                       omk=0)
+
+    pars.InitPower.set_params(ns=0.9665,
+                              pivot_scalar=0.05,
+                              As=2.1056e-9)
+
+    pars.set_dark_energy()
+    pars.NonLinear = model.NonLinear_none
+
+    lmax = max(300, lmax)
+
+    max_eta_k = k_eta_fac * lmax
+    max_eta_k = max(max_eta_k, 50000)
+
+    pars.max_l = lmax
+    pars.max_l_tensor = lmax
+    pars.max_eta_k = max_eta_k
+    pars.max_eta_k_tensor = max_eta_k
+    pars.max_l_evolve = lmax + 300
+
+    pars.Accuracy.IntkAccuracyBoost = k_acc
+    pars.Accuracy.SourcekAccuracyBoost = k_acc
+
+    pars.AccurateBB = True
+    pars.AccurateReionization = True
+    pars.AccuratePolarization = True
+
+    # pars.set_for_lmax(2500, lens_potential_accuracy=3)
+
+    # calculate results for these parameters
+    print('Calculate transfer functions')
+    data = camb.get_transfer_functions(pars)
+    transfer_s = data.get_cmb_transfer_data('scalar')
+    print(transfer_s.q.shape)
+    # print(camb.get_transfer_functions(pars).get_cmb_transfer_data('scalar').q.shape)
+
+    data.calc_power_spectra()
+    cls_camb = data.get_cmb_power_spectra(lmax=None, raw_cl=True, CMB_unit='muK')
+
+    for key in cls_camb:
+        cls_cm = cls_camb[key]
+        n_ell, n_pol = cls_cm.shape
+        temp = np.ascontiguousarray(cls_cm.transpose())
+        # Remove monopole and dipole.
+        cls_camb[key] = temp[:, 2:]
+
+    ells_cls = np.arange(2, n_ell)
+    cls['ells'] = ells_cls
+    cls['cls'] = cls_camb
+
+    # We need to modify scalar E-mode and tensor I transfer functions,
+    # see Zaldarriaga 1997 eq. 18 and 39. (CAMB applies these factors
+    # at a later stage).
+
+    try:
+        ells = transfer_s.l
+    except AttributeError:
+        ells = transfer_s.L
+        # CAMB ells are in int32, gives nan in sqrt, so convert first.
+    ells = np.array(ells, dtype="int64")
+    prefactor = np.sqrt((ells + 2) * (ells + 1) * ells * (ells - 1))
+
+    transfer_s.delta_p_l_k[1, ...] *= prefactor[:, np.newaxis]
+    transfer_s.delta_p_l_k *= (pars.TCMB * 1e6)
+    print(transfer_s.q.shape)
+    transfer['scalar'] = transfer_s.delta_p_l_k
+    transfer['k'] = transfer_s.q
+    transfer['ells'] = ells  # sparse and might differ from cls['ells']
+    cosmo_file = 'cosmo.pkl'
+    with open(cosmo_file, 'wb') as handle:
+        pickle.dump(transfer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    return transfer, cls
+
+
+
 try:
     AccuracyBoost = int(sys.argv[1])
 except(IndexError):
-    AccuracyBoost = 4
+    AccuracyBoost = 1
 try:
     lAccuracyBoost = int(sys.argv[2])
 except(IndexError):
-    lAccuracyBoost = 7
+    lAccuracyBoost = 1
 try:
     k_acc = int(sys.argv[3])
 except(IndexError):
     k_acc= 1
+try:
+    N_bins = int(sys.argv[4])
+except(IndexError):
+    N_bins = 2
 
+comm = MPI.COMM_WORLD
+MPI_size = comm.Get_size()
+MPI_rank = comm.Get_rank()
 
-run_camb(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, ze=np.array([1, 2]), k_acc=k_acc)
-'''
+if MPI_rank==0:
+	transfer, cls = run_camb_cosmo(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, k_acc=k_acc, verbose=True)
+	cosmo_dict = {'transfer_cosmo': transfer}
+comm.Barrier()
+pkl_file = open('cosmo.pkl', 'rb')
+cosmo_k = pickle.load(pkl_file)
+k = cosmo_k['k']
+print(k)
+run_camb_ksz(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, ze=np.array([1, 2]), k_acc=k_acc, k_arr=k, N_bins=N_bins)
+
 #ksz_dict = {}
 #ksz_dict['cls'] = cls_ksz
 #ksz_dict['transfer'] = transfer_ksz

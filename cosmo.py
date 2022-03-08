@@ -2,7 +2,7 @@ import numpy as np
 import camb
 from camb import model
 
-def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracyBoost=5, verbose=True):
+def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracyBoost=3, kSampling=1, verbose=True):
     transfer = {}
     cls = {}
 
@@ -30,7 +30,8 @@ def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracy
 
     pars.set_dark_energy()
     pars.NonLinear = model.NonLinear_none
-
+    pars.Accuracy.IntkAccuracyBoost = kSampling
+    pars.Accuracy.SourcekAccuracyBoost =kSampling
     lmax = max(300, lmax)
 
     max_eta_k = k_eta_fac * lmax

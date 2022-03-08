@@ -276,7 +276,7 @@ def run_camb(lmax=300, k_eta_fac=10, AccuracyBoost=4, lSampleBoost=50, lAccuracy
 comm = MPI.COMM_WORLD
 MPI_size = comm.Get_size()
 MPI_rank = comm.Get_rank()
-'''
+
 try:
     AccuracyBoost = int(sys.argv[1])
 except(IndexError):
@@ -292,7 +292,7 @@ except(IndexError):
 
 
 run_camb(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, ze=np.array([1, 2]), k_acc=k_acc)
-'''
+
 #ksz_dict = {}
 #ksz_dict['cls'] = cls_ksz
 #ksz_dict['transfer'] = transfer_ksz

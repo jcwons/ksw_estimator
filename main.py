@@ -23,7 +23,7 @@ def get_ksz_radii():
     """
     Get the radii (in Mpc) that are more suitable for the sst case.
     """
-    booster = 2
+    booster = 3
     vlow = np.linspace(0, 10, num=booster*10, dtype=float, endpoint=False)
     ksz1 = np.linspace(10, 2000, num=booster*80, dtype=float, endpoint=False)
     ksz2 = np.linspace(2000, 6000, num=booster*300, dtype=float, endpoint=False)
@@ -161,14 +161,15 @@ class PreCalc:
         if self.mpi_rank == 0:
             print(text, flush=True)
 
-    def init_cosmo(self, lmax, AccuracyBoost=2):
+    def init_cosmo(self, lmax, AccuracyBoost=1, kSampling=1):
         """
         Collect transfer functions and cls to save in self.cosmo
         1) Run CAMB and get T,E,B
         2) Read in transfer and cls from kSZ and pSZ
         """
-        #cosmo_file = path + '/cosmo_{}.pkl'.format(lmax - 100)
-        cosmo_file = path + '/Tests/cosmo_{}_2b_3k.pkl'.format(lmax - 100)
+        cosmo_file = path + '/cosmo_{}.pkl'.format(lmax - 100)
+        #cosmo_file = path + '/Tests/cosmo_{}_2b_3k.pkl'.format(lmax - 100)
+        cosmo_file = path + '/cosmo.pkl'
         recompute_cosmo = False
         if self.mpi_rank == 0:
             try:
@@ -188,7 +189,7 @@ class PreCalc:
 
         if recompute_cosmo:
             self.printmpi('Runnnig CAMB for transfer, k, ells and cls ')
-            transfer, cls = cs.run_camb(lmax=lmax, lSampleBoost=50, AccuracyBoost=AccuracyBoost)
+            transfer, cls = cs.run_camb(lmax=lmax, lSampleBoost=50, AccuracyBoost=AccuracyBoost, kSampling=kSampling)
             self.cosmo['transfer'] = transfer
             self.cosmo['cls'] = cls
             if self.mpi_rank == 0:
@@ -198,9 +199,9 @@ class PreCalc:
                     pickle.dump(self.cosmo, handle,
                                 protocol=pickle.HIGHEST_PROTOCOL)
             self.printmpi('Computed cosmo')
-        ells = self.cosmo['cls']['ells']
-        clss = self.cosmo['cls']['cls']['lensed_scalar']
-        np.savetxt('cls.txt', np.column_stack([ells, clss[0, :], clss[1, :], clss[2, :], clss[3, :]]))
+#        ells = self.cosmo['cls']['ells']
+#        clss = self.cosmo['cls']['cls']['lensed_scalar']
+#        np.savetxt('cls.txt', np.column_stack([ells, clss[0, :], clss[1, :], clss[2, :], clss[3, :]]))
 
     def init_ksz(self, lmax, ze, AccuracyBoost=2):
         """
@@ -208,7 +209,8 @@ class PreCalc:
         2) Read in transfer and cls from kSZ
         """
         #ksz_file = path + '/ksz_{}.pkl'.format(300)
-        ksz_file = path + '/Tests/ksz_{}_2b_3k.pkl'.format(300)
+        #ksz_file = path + '/ksz_{}_acc4_50_7_k6.pkl'.format(300)
+        ksz_file = path + '/ksz_300_ac_8_7_k2.pkl'
         recompute_ksz = False
         if self.mpi_rank == 0:
             try:
@@ -218,7 +220,7 @@ class PreCalc:
                 recompute_ksz = True
             else:
                 print('loaded ksz from {}'.format(ksz_file))
-                self.ksz = pickle.load(pkl_file)
+                self.ksz['transfer'] = pickle.load(pkl_file)
                 pkl_file.close()
         # Tell all ranks if file was found
         recompute_ksz = self.comm.bcast(recompute_ksz, root=0)
@@ -320,7 +322,7 @@ class PreCalc:
         if precomputed skips calculation, read file and stores in dict
         """
 
-        ells = self.cosmo['cls']['ells']
+        ells = self.ksz['transfer']['ells']
         lmax = ells.size + 1
         # radii = get_komatsu_radii()
         radii = get_ksz_radii()
@@ -353,12 +355,15 @@ class PreCalc:
         :return:beta(ells_sub.size, len(pols_s), np.size(func, 0), radii.size)
                 containing the K functional for every shape function
         """
-        transfer_cmb = self.cosmo['transfer']['scalar'][:2, :-100, :]
-        transfer_ksz = self.ksz['transfer']['ksz'][:, :transfer_cmb.shape[1],:]
+        transfer_cmb = self.cosmo['scalar'][:2, :, :]
+#        print(self.ksz.shape)
+        transfer_ksz = self.ksz['transfer']['ksz'][:, :,:]
+#        transfer_cmb = np.zeros_like(transfer_ksz)
+#        transfer_ksz = self.ksz[:, :transfer_cmb.shape[1],:]
         self.printmpi(transfer_cmb.shape)
         self.printmpi(transfer_ksz.shape)
         #transfer_s = transfer_cmb
-        k = self.cosmo['transfer']['k']
+        k = self.ksz['transfer']['k']
         transfer_s = np.append(transfer_cmb, transfer_ksz, axis=0)
         lmax = ells.size + 1
         n_pol = transfer_s.shape[0]
@@ -388,7 +393,7 @@ class PreCalc:
 
         self.printmpi('Compute: beta')
         for lidx, ell in enumerate(ells_sub):
-            if lidx % 5 == 0:
+            if lidx % 1 == 0:
                 self.printmpi('{}/{}'.format(lidx, len(ells_sub) - 1))
             for ridx, radius in enumerate(radii):
                 kr = k * radius
@@ -472,16 +477,16 @@ class PreCalc:
         """
 
         # Get transfer, ells and k from dict
-        ells = self.cosmo['transfer']['ells'][:-100]
-        k = self.cosmo['transfer']['k']
-        transfer_cmb = self.cosmo['transfer']['scalar'][:2, :ells.size, :]  # lmax is 100 higher, remove B pol
+        ells = self.ksz['transfer']['ells'][:]
+        k = self.ksz['transfer']['k']
+        transfer_cmb = self.cosmo['scalar'][:2, :ells.size, :]  # lmax is 100 higher, remove B pol
         transfer_ksz = self.ksz['transfer']['ksz'][:, :ells.size, :]
+        # transfer_cmb = np.zeros_like(transfer_ksz)
         # if different k has been used for cmb and ksz, error will pop up
         transfer = np.append(transfer_cmb, transfer_ksz, axis=0)
 
         # Only get the requested polarisations
         transfer = transfer[pols, :, :]
-
         # Create all duplets of polarisation
         # T : 0     E : 1
         # B1: 2     B2: 3
@@ -535,7 +540,7 @@ class PreCalc:
         """
         Calculate the bispectrum
         """
-        ells = self.cosmo['cls']['ells']
+        ells = self.ksz['transfer']['ells']
         #cls = self.cosmo['cls']['cls']['lensed_scalar']
         beta_s = self.beta['beta_s']
 
@@ -789,8 +794,8 @@ F = PreCalc()
 # F.init_CMBS4_setting()
 
 # Calculate CMB and ksz data
-F.init_cosmo(lmax=lmax + 100, AccuracyBoost=1)  # Actually only calculates to lmax - 100
-F.init_ksz(lmax=lmax+100, ze=ze, AccuracyBoost=1)
+F.init_cosmo(lmax=lmax + 100, kSampling=12)  # Actually only calculates to lmax - 100
+F.init_ksz(lmax=lmax+100, ze=ze)
 start = timeit.default_timer()
 # Pre-calculate the primordial fcts
 F.init_beta(prim_shape)
