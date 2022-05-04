@@ -1,8 +1,10 @@
 import numpy as np
 import camb
+import sys
+import pickle
 from camb import model
 
-def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracyBoost=3, kSampling=1, verbose=True):
+def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracyBoost=3, kSampling=1, verbose=True, output_name='test.pkl'):
     transfer = {}
     cls = {}
 
@@ -54,13 +56,11 @@ def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracy
 
     data = camb.get_transfer_functions(pars)
     transfer_s = data.get_cmb_transfer_data('scalar')
-    print(transfer_s.q.shape)
     #print(camb.get_transfer_functions(pars).get_cmb_transfer_data('scalar').q.shape)
 
     data.calc_power_spectra()
     cls_camb = data.get_cmb_power_spectra(lmax=None, raw_cl=True, CMB_unit='muK')
 
-    print(cls_camb['total'].shape, 'cls after')
     print(transfer_s.delta_p_l_k.shape, 'transfer_plk')
     for key in cls_camb:
         cls_cm = cls_camb[key]
@@ -91,4 +91,23 @@ def run_camb(lmax=2500, k_eta_fac=5, AccuracyBoost=3, lSampleBoost=50, lAccuracy
     transfer['scalar'] = transfer_s.delta_p_l_k
     transfer['k'] = transfer_s.q
     transfer['ells'] = ells  # sparse and might differ from cls['ells']
+    
+    with open(output_name, 'wb') as handle:
+        pickle.dump(transfer, handle, protocol=pickle.HIGHEST_PROTOCOL)
     return transfer, cls
+
+
+try:
+    AccuracyBoost = int(sys.argv[1])
+except(IndexError):
+    AccuracyBoost=AccuracyBoost = int(3)
+try:
+    k_acc = int(sys.argv[2])
+except(IndexError):
+    k_acc = int(1)
+try:
+    output_name = str(sys.argv[3])
+except(IndexError):
+    output_name = 'test.pkl'
+
+run_camb(lmax=300, k_eta_fac=5, AccuracyBoost=AccuracyBoost, lSampleBoost=50, lAccuracyBoost=7, kSampling=k_acc, verbose=True, output_name=output_name)

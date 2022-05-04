@@ -18,7 +18,7 @@ mpi_rank = comm.Get_rank()  # Assigns every core a rank (integer value)
 mpi_size = comm.Get_size()
 
 lmax = 300
-lmin = 2
+lmin = 10
 ells = np.arange(lmin,lmax+1)
 
 ells_sub = ells[mpi_rank::mpi_size]

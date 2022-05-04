@@ -70,13 +70,14 @@ def Ker(ze, k, data):
         etas = data.conformal_time(0.0) - data.comoving_radial_distance(z)
         Hubble = data.h_of_z(z)
         # Rtopsi = 5/3 # don't need this. We work with R
+        print('yo')
         v_cambs = - data.get_time_evolution(k, etas, ['v_newtonian_cdm'])[:, 0]
         # camb gives Dv*k^2/(a*H)*Tk
         v_cambs *= ae * Hubble
         v_cambs = np.squeeze(v_cambs)
         Ker_Tk_camb = v_cambs / k  # camb gives Dv * k^2
         Dv_Tk[zidx, :] = Ker_Tk_camb
-        print("{}/{}".format(zidx+1 ,len(ze)), end='')
+        print("{}/{}".format(zidx+1 ,len(ze)), end='', flush=True)
     return Dv_Tk
 
 def get_transfer(ze, k, ells, data):
@@ -116,14 +117,15 @@ def get_transfer_bin(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, k, ells, d
     comm.Bcast(count, root=0)
     z_rank = np.zeros(count[MPI_rank])
     comm.Scatterv([z_samples, count, displ, MPI.DOUBLE], z_rank, root=0)
-    print(MPI_rank, z_rank)
+    #print(MPI_rank, z_rank)
     comm.Barrier()
     for zidx, z in enumerate(z_rank):
         print("{}  {}/{} ".format(MPI_rank,zidx + 1, len(z_rank)), end='', flush=True)
         etas = data.conformal_time(0.0) - data.comoving_radial_distance(z)
         Hubble = data.h_of_z(z)
         v_cambs = - data.get_time_evolution(k, etas, ['v_newtonian_cdm'])[:, 0]
-        # camb gives Dv*k^2/(a*H)*Tk
+        
+# camb gives Dv*k^2/(a*H)*Tk
         v_cambs *= az(z) * Hubble
         v_cambs = np.squeeze(v_cambs)
         Dv_Tk = v_cambs / k  # camb gives Dv * k^2
@@ -183,7 +185,8 @@ def run_camb_ksz(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccu
     '''    
     pars.Accuracy.SourcekAccuracyBoost =k_acc
     pars.Accuracy.IntkAccuracyBoost = k_acc
- 
+    pars.Accuracy.BesselBoost = k_acc 
+
     pars.set_accuracy(**acc_opts)
     pars.set_dark_energy()
     pars.NonLinear = model.NonLinear_none
@@ -205,7 +208,7 @@ def run_camb_ksz(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccu
 
     transfer_ksz['k'] = k
     transfer_ksz['redshift'] = ze
-    ells = np.arange(2, lmax + 1)
+    ells = np.arange(1, lmax + 1)
     transfer_ksz['ells'] = ells
 # Broadcast CAMB results to other cores
     # Transfer data from dict to local variables
@@ -215,15 +218,16 @@ def run_camb_ksz(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccu
         print('Get transfer functions for velocity', flush=True)
 
     z_min = 0.2
-    z_max = 2
+    z_max = 3
 # is now input from os
 #    N_bins = 4
-    N_samples_in_bin = 120
+    N_samples_in_bin = np.int(240 * 8 / N_bins)
 
     delta_v_zlk = np.zeros([N_bins, ells.size, k.size])
     for i in range(N_bins):
         delta_v_zlk[i, :, :] = get_transfer_bin(z_min, z_max, N_bins, i, N_samples_in_bin, k, ells, data, pars)
-        print('Bin done')
+        if MPI_rank == 0:
+            print('Bin done', flush=True)
     delta_v_zlk /= N_samples_in_bin
 
     transfer_ksz['ksz'] = delta_v_zlk
@@ -239,6 +243,8 @@ def run_camb_ksz(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccu
     return transfer_ksz
 
 def run_camb_cosmo(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccuracyBoost=7, k_acc=2, verbose=True):
+    if MPI_rank == 0:
+        print("Initialising CAMB with Planck 2018 Cosmology", flush=True)
     transfer = {}
     cls = {}
 
@@ -288,10 +294,10 @@ def run_camb_cosmo(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAc
     # pars.set_for_lmax(2500, lens_potential_accuracy=3)
 
     # calculate results for these parameters
-    print('Calculate transfer functions')
+    #print('Calculate transfer functions')
     data = camb.get_transfer_functions(pars)
     transfer_s = data.get_cmb_transfer_data('scalar')
-    print(transfer_s.q.shape)
+    #print(transfer_s.q.shape)
     # print(camb.get_transfer_functions(pars).get_cmb_transfer_data('scalar').q.shape)
 
     data.calc_power_spectra()
@@ -354,15 +360,15 @@ comm = MPI.COMM_WORLD
 MPI_size = comm.Get_size()
 MPI_rank = comm.Get_rank()
 
-if MPI_rank==0:
-	transfer, cls = run_camb_cosmo(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, k_acc=k_acc, verbose=True)
-	cosmo_dict = {'transfer_cosmo': transfer}
-comm.Barrier()
-pkl_file = open('cosmo.pkl', 'rb')
+#if MPI_rank==0:
+#	transfer, cls = run_camb_cosmo(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, k_acc=k_acc, verbose=True)
+#	cosmo_dict = {'transfer_cosmo': transfer}
+#comm.Barrier()
+pkl_file = open('Output/cosmo_300_8_3.pkl', 'rb')
 cosmo_k = pickle.load(pkl_file)
 k = cosmo_k['k']
-print(k)
-run_camb_ksz(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, ze=np.array([1, 2]), k_acc=k_acc, k_arr=k, N_bins=N_bins)
+#print(k)
+run_camb_ksz(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, ze=np.array([0, 0.4]), k_acc=k_acc, k_arr=k, N_bins=N_bins)
 
 #ksz_dict = {}
 #ksz_dict['cls'] = cls_ksz
@@ -372,5 +378,6 @@ run_camb_ksz(AccuracyBoost=AccuracyBoost, lAccuracyBoost=lAccuracyBoost, ze=np.a
 #with open(ksz_file, 'wb') as handle:
 #    pickle.dump(ksz_dict, handle,
 #                protocol=pickle.HIGHEST_PROTOCOL)
+
 
 
