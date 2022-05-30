@@ -63,40 +63,6 @@ def Z_bin_samples(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, data, pars):
     z_samples = data.redshift_at_comoving_radial_distance(Chi_samples)
     return z_samples
 
-def Ker(ze, k, data):
-    Dv_Tk = np.zeros([ze.size, k.size])
-    for zidx, z in enumerate(ze):
-        ae = az(z)
-        etas = data.conformal_time(0.0) - data.comoving_radial_distance(z)
-        Hubble = data.h_of_z(z)
-        # Rtopsi = 5/3 # don't need this. We work with R
-        print('yo')
-        v_cambs = - data.get_time_evolution(k, etas, ['v_newtonian_cdm'])[:, 0]
-        # camb gives Dv*k^2/(a*H)*Tk
-        v_cambs *= ae * Hubble
-        v_cambs = np.squeeze(v_cambs)
-        Ker_Tk_camb = v_cambs / k  # camb gives Dv * k^2
-        Dv_Tk[zidx, :] = Ker_Tk_camb
-        print("{}/{}".format(zidx+1 ,len(ze)), end='', flush=True)
-    return Dv_Tk
-
-def get_transfer(ze, k, ells, data):
-    print('Get the velocity growth function')
-    #Dv_Tk = Ker(ze, k, data)
-    delta_v_zlk = np.zeros([ze.size, ells.size, k.size])
-    # Get transfer functions
-    for zidx, z in enumerate(ze):
-        for lidx, ell in enumerate(ells):
-            const = 1 / (2 * ell + 1)
-            chie = data.comoving_radial_distance(z)
-            bessel = (ell * special.spherical_jn(ell - 1, k * chie) - (ell + 1) * special.spherical_jn(ell + 1,
-                                                                                                       k * chie))
-            bessel = special.spherical_jn(ell, k * chie)
-            #delta_v = const * Dv_Tk[zidx, :] * bessel
-            delta_v = const * k * bessel
-            delta_v_zlk[zidx, lidx, :] = delta_v
-    return delta_v_zlk
-
 def get_transfer_bin(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, k, ells, data, pars):
     delta_v_lk_rank = np.zeros([ells.size, k.size])
 
@@ -108,7 +74,7 @@ def get_transfer_bin(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, k, ells, d
 
         displ = [sum(count[:p]) for p in range(MPI_size)]
         displ = np.array(displ)
-        print('Samples are:', z_samples)
+#        print('Samples are:', z_samples)
     else:
         z_samples = None
         # initialize count on worker processes
@@ -120,15 +86,20 @@ def get_transfer_bin(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, k, ells, d
     #print(MPI_rank, z_rank)
     comm.Barrier()
     for zidx, z in enumerate(z_rank):
+        print(z)
         print("{}  {}/{} ".format(MPI_rank,zidx + 1, len(z_rank)), end='', flush=True)
         etas = data.conformal_time(0.0) - data.comoving_radial_distance(z)
         Hubble = data.h_of_z(z)
-        v_cambs = - data.get_time_evolution(k, etas, ['v_newtonian_cdm'])[:, 0]
-        
+        v_cambs = - data.get_time_evolution(k[-100:], etas, ['v_newtonian_cdm'])[:, 0]
+        # v_cambs = - data.get_time_evolution(k, etas, ['delta_cdm'])[:, 0]        
 # camb gives Dv*k^2/(a*H)*Tk
+        print(v_cambs)
+        print('a(z) {}'.format(az(z)))
+        print('Hublle {}'.format(Hubble))
         v_cambs *= az(z) * Hubble
         v_cambs = np.squeeze(v_cambs)
-        Dv_Tk = v_cambs / k  # camb gives Dv * k^2
+        Dv_Tk= v_cambs / k[-100:]  # camb gives Dv * k^2
+        print(Dv_Tk[-100:])
 #        print("{}/{}".format(zidx + 1, len(ze)), end='')
 
         chie = data.comoving_radial_distance(z)
@@ -151,7 +122,8 @@ def get_transfer_bin(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, k, ells, d
     return delta_v_lk
 
 def run_camb_ksz(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccuracyBoost=7, ze=np.array([1, 2]), k_acc=2, k_arr=None, N_bins=2):
-    print(AccuracyBoost,lAccuracyBoost,k_acc)
+    if MPI_rank == 0:
+        print(AccuracyBoost,lAccuracyBoost,k_acc, flush=True)
     transfer_ksz = {}
         # Initialising CAMB with Planck 2018 Cosmology
     if MPI_rank == 0:
@@ -234,7 +206,9 @@ def run_camb_ksz(lmax=300, k_eta_fac=10, AccuracyBoost=8, lSampleBoost=50, lAccu
     transfer_ksz['k'] = k
     transfer_ksz['redshift'] = ze
     transfer_ksz['ells'] = ells
-    tag = './Output/ksz_300_b{}_ac_{}_{}_k{}.pkl'.format(N_bins, AccuracyBoost, lAccuracyBoost, k_acc)
+    # tag = './Output/ksz_300_b{}_ac_{}_{}_k{}.pkl'.format(N_bins, AccuracyBoost, lAccuracyBoost, k_acc)
+    tag = './Output/delta_300_b{}_ac_{}_{}_k{}.pkl'.format(N_bins, AccuracyBoost, lAccuracyBoost, k_acc)
+
     if MPI_rank == 0:
         with open(tag, 'wb') as handle:
             pickle.dump(transfer_ksz, handle,
@@ -354,7 +328,7 @@ except(IndexError):
 try:
     N_bins = int(sys.argv[4])
 except(IndexError):
-    N_bins = 2
+    N_bins = 4
 
 comm = MPI.COMM_WORLD
 MPI_size = comm.Get_size()
