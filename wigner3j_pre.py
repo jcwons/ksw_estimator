@@ -17,8 +17,8 @@ comm = MPI.COMM_WORLD
 mpi_rank = comm.Get_rank()  # Assigns every core a rank (integer value)
 mpi_size = comm.Get_size()
 
-lmax = 300
-lmin = 10
+lmax = 200
+lmin = 1
 ells = np.arange(lmin,lmax+1)
 
 ells_sub = ells[mpi_rank::mpi_size]
