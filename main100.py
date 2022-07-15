@@ -82,57 +82,44 @@ def delta_l1l2l3(ell1, ell2, ell3):
         delta = 1
     return delta
 
-
-def local_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3):
-    # old version without dictionaries
-    shape_func = beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 0,
-                                                                                         :] \
-                 + beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 1, :] * beta_s[ell1 - l_min, pidx1,
-                                                                                           0, :] \
-                 + beta_s[ell3 - l_min, pidx3, 1, :] * beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2,
-                                                                                           0, :]
-    shape_func *= 2
-    return shape_func
-
-
-def local_shape2(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3):
+def local_shape(beta_s, ell1, ell2, ell3, lmin, p1, p2, p3):
     # New version where polarisation index is a dictionary key
-    s1 = beta_s[pidx1][ell1 - l_min, 1, :] * beta_s[pidx2][ell2 - l_min, 1, :] * beta_s[pidx3][ell3 - l_min, 0, :]
-    s2 = beta_s[pidx2][ell2 - l_min, 1, :] * beta_s[pidx3][ell3 - l_min, 1, :] * beta_s[pidx1][ell1 - l_min, 0, :]
-    s3 = beta_s[pidx3][ell3 - l_min, 1, :] * beta_s[pidx1][ell1 - l_min, 1, :] * beta_s[pidx2][ell2 - l_min, 0, :]
-    shape_func = 2 * (s1 + s2 + s3)
-    return shape_func
+    # ell index and pidx has to match
+    # bba
+    shape = beta_s[p1][ell1 - lmin, 1, :] * beta_s[p2][ell2 - lmin, 1, :] * beta_s[p3][ell3 - lmin, 0, :]
+    # bab
+    shape += beta_s[p1][ell1 - lmin, 1, :] * beta_s[p2][ell2 - lmin, 0, :] * beta_s[p3][ell3 - lmin, 1, :]
+    # abb
+    shape += beta_s[p1][ell1 - lmin, 0, :] * beta_s[p2][ell2 - lmin, 1, :] * beta_s[p3][ell3 - lmin, 1, :]
+    shape *= 2
+    return shape
 
+def equil_shape(beta_s, ell1, ell2, ell3 ,lmin, p1, p2, p3):
+    # equilateral, orthogonal and flattened shape consist of same shape functions, but with different prefactors
+    # a: alpha, b: beta, g: gamma, d: delta
+    bba = 0
+    ddd = 0
+    bdg = 1.
 
-def equil_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3):
-    """"
-
-    This one should definitely be updated to newer version with polarisation dict key
-    """
-    shape_func = - local_shape(beta_s, ell1, ell2, ell3, l_min, pidx1, pidx2, pidx3)
-    # delta delta delta
-    shape_func -= beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 3,
-                                                                                          :]
-    # beta gamma delta
-    shape_func += beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 2, :] * beta_s[ell3 - l_min, pidx3, 3,
-                                                                                          :]
+    # bba
+    shape = bba * local_shape(beta_s, ell1, ell2, ell3, lmin, p1, p2, p3) / 2 # local shape has 2 factor
+    # ddd
+    shape += ddd * beta_s[p1][ell1 - lmin, 3, :] * beta_s[p2][ell2 - lmin, 3, :] * beta_s[p3][ell3 - lmin, 3, :]
+    # bgd
+    shape += bdg * beta_s[p1][ell1 - lmin, 1, :] * beta_s[p2][ell2 - lmin, 2, :] * beta_s[p3][ell3 - lmin, 3, :]
     # bdg
-    shape_func += beta_s[ell1 - l_min, pidx1, 1, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 2,
-                                                                                          :]
+    shape += bdg * beta_s[p1][ell1 - lmin, 1, :] * beta_s[p2][ell2 - lmin, 3, :] * beta_s[p3][ell3 - lmin, 2, :]
     # gbd
-    shape_func += beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 2,
-                                                                                          :]
-    # dgb
-    shape_func += beta_s[ell1 - l_min, pidx1, 3, :] * beta_s[ell2 - l_min, pidx2, 2, :] * beta_s[ell3 - l_min, pidx3, 1,
-                                                                                          :]
-    # gbd
-    shape_func += beta_s[ell1 - l_min, pidx1, 2, :] * beta_s[ell2 - l_min, pidx2, 1, :] * beta_s[ell3 - l_min, pidx3, 3,
-                                                                                          :]
+    shape += bdg * beta_s[p1][ell1 - lmin, 2, :] * beta_s[p2][ell2 - lmin, 1, :] * beta_s[p3][ell3 - lmin, 3, :]
     # gdb
-    shape_func += beta_s[ell1 - l_min, pidx1, 2, :] * beta_s[ell2 - l_min, pidx2, 3, :] * beta_s[ell3 - l_min, pidx3, 1,
-                                                                                          :]
-    return shape_func
+    shape += bdg * beta_s[p1][ell1 - lmin, 2, :] * beta_s[p2][ell2 - lmin, 3, :] * beta_s[p3][ell3 - lmin, 1, :]
+    # dbg
+    shape += bdg * beta_s[p1][ell1 - lmin, 3, :] * beta_s[p2][ell2 - lmin, 1, :] * beta_s[p3][ell3 - lmin, 2, :]
+    # dgb
+    shape += bdg * beta_s[p1][ell1 - lmin, 3, :] * beta_s[p2][ell2 - lmin, 2, :] * beta_s[p3][ell3 - lmin, 1, :]
 
+    shape *= 6
+    return shape
 
 # (beam, noise, lmin)
 class PreCalc:
@@ -391,7 +378,11 @@ class PreCalc:
         self.beta['radii'] = radii
 
         # Check if beta already has been computed
-        beta_file = path + '/beta_' + prim_shape + '_{}_{}.pkl'.format(lmax, self.N_bins)
+        if prim_shape == 'local':
+            beta_file = path + '/beta_' + prim_shape + '_{}_{}.pkl'.format(lmax, self.N_bins)
+        else:
+            beta_file = path + '/beta_equil' + '_{}_{}.pkl'.format(lmax, self.N_bins)
+        
         # beta_file = path + '/beta_' + prim_shape + '_{}.pkl'.format(51)
         # beta_file = path + '/Debug/beta_test_300.pkl'
         try:
@@ -582,6 +573,14 @@ class PreCalc:
             pols = np.array([4])
         elif pol_opts == 'delta4':
             pols = np.array([5])
+        elif pol_opts == 'delta5':
+            pols = np.array([6])
+        elif pol_opts == 'delta6':
+            pols = np.array([7])
+        elif pol_opts == 'delta7':
+            pols = np.array([8])
+        elif pol_opts == 'delta8':
+            pols = np.array([9])
 
         elif pol_opts == 'ksz':
             pols = np.arange(n_bins) + 2 + n_bins
@@ -593,7 +592,14 @@ class PreCalc:
             pols = np.array([n_bins + 3 + 1])
         elif pol_opts == 'ksz4':
             pols = np.array([n_bins + 4 + 1])
-
+        elif pol_opts == 'ksz5':
+            pols = np.array([n_bins + 5 + 1])
+        elif pol_opts == 'ksz6':
+            pols = np.array([n_bins + 6 + 1])
+        elif pol_opts == 'ksz7':
+            pols = np.array([n_bins + 7 + 1])
+        elif pol_opts == 'ksz8':
+            pols = np.array([n_bins + 8 + 1])
 
         elif pol_opts == 'deltaksz':
             pols = np.arange(2 * n_bins) + 2
@@ -887,7 +893,10 @@ class PreCalc:
                     # Get bispectra for all polarisation triplets
                     bispec = np.zeros(pol_trpl.shape[0])
                     for pidx3, pidx2, pidx1 in pol_trpl:
-                        shape_func = local_shape2(beta_s, ell1, ell2, ell3, lmin, pidx1, pidx2, pidx3)
+                        if shape == 'local':
+                            shape_func = local_shape(beta_s, ell1, ell2, ell3, lmin, pidx1, pidx2, pidx3)
+                        elif shape == 'equil':
+                            shape_func = equil_shape(beta_s, ell1, ell2, ell3, lmin, pidx1, pidx2, pidx3)
                         bispec[pidx] = np.trapz(shape_func * r2, radii)
 
                         pidx += 1
