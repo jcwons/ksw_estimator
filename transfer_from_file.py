@@ -163,7 +163,7 @@ def get_transfer_bin_d(Delta_bin, z_bin, k, ells, data):
     )
     return delta_d_lk_total
 
-def run_camb(lmax=300, N_bins=4,pol='both',input='camb'):
+def run_camb(lmax=100, N_bins=4,pol='both',input='camb'):
     acc_opts = dict(AccuracyBoost=10,
                     lSampleBoost=50,
                     lAccuracyBoost=7,
@@ -198,8 +198,7 @@ def run_camb(lmax=300, N_bins=4,pol='both',input='camb'):
     pars.Accuracy.BesselBoost = k_acc
 
 
-    lmax = max(300, lmax)
-
+    #lmax = max(300, lmax)
     max_eta_k = k_eta_fac * lmax
     max_eta_k = max(max_eta_k, 50000)
     
@@ -232,6 +231,7 @@ def run_camb(lmax=300, N_bins=4,pol='both',input='camb'):
     kz = pickle.load(pkl_file)
     k = kz['k']
     z = kz['z']
+
     if MPI_rank==0:
         print('Number of bins: {}'.format(N_bins))
         print('Sampling between the redshifts: {} - {}'.format(z[0],z[-1]))
@@ -246,12 +246,12 @@ def run_camb(lmax=300, N_bins=4,pol='both',input='camb'):
     else:
         if MPI_rank==0:
             print('Using camb with for delta synchronous gauge')
-        pkl_file = open('Output/transfer_delta_v_camb.pkl', 'rb')
+        pkl_file = open('Output/transfer_delta_v_camb_all.pkl', 'rb')
     deltas = pickle.load(pkl_file)
 
 
-    delta_v_zlk = np.zeros([N_bins, ells.size, k.size])
-    delta_d_zlk = np.zeros([N_bins, ells.size, k.size])
+    #delta_v_zlk = np.zeros([N_bins, ells.size, k.size])
+    #delta_d_zlk = np.zeros([N_bins, ells.size, k.size])
     if pol == 'velocity':
         delta_v_zlk = np.zeros([N_bins, ells.size, k.size])
         if MPI_rank == 0:
@@ -261,9 +261,9 @@ def run_camb(lmax=300, N_bins=4,pol='both',input='camb'):
         if MPI_rank == 0:
             print('Calculating density transfer function')
     else:
+        delta_v_zlk = np.zeros([ells.size, k.size])
+        delta_d_zlk = np.zeros([ells.size, k.size])
         if MPI_rank == 0:
-            delta_v_zlk = np.zeros([N_bins, ells.size, k.size])
-            delta_d_zlk = np.zeros([N_bins, ells.size, k.size])
             print('Calculating velocity and density transfer function')
 
 
@@ -285,12 +285,22 @@ def run_camb(lmax=300, N_bins=4,pol='both',input='camb'):
                 delta_d_zlk[i, :, :] = get_transfer_bin_d(Delta_bin, z_bin, k, ells, data)
                 delta_d_zlk[i, :, :] /= z_bin.size
             else:
-                Delta_bin = deltas[:, start:end, 1]
-                delta_v_zlk[i, :, :] = get_transfer_bin_v(Delta_bin, z_bin, k, ells, data)
-                delta_v_zlk[i, :, :] /= z_bin.size
+                #Delta_bin = deltas[:, start:end, 1]
+                #delta_v_zlk[i, :, :] = get_transfer_bin_v(Delta_bin, z_bin, k, ells, data)
+                #delta_v_zlk[i, :, :] /= z_bin.size
+                #if MPI_rank == 0:
+                #    tag = './Output/{}/transfer_{}_v_l100_z2.pkl'.format(N_bins,i)
+                #    with open(tag, 'wb') as handle:
+                #        pickle.dump(delta_v_zlk[i, :, :], handle,
+                #            protocol=pickle.HIGHEST_PROTOCOL)
                 Delta_bin = deltas[:, start:end, 0]
-                delta_d_zlk[i, :, :] = get_transfer_bin_d(Delta_bin, z_bin, k, ells, data)
-                delta_d_zlk[i, :, :] /= z_bin.size
+                delta_d_zlk[:, :] = get_transfer_bin_d(Delta_bin, z_bin, k, ells, data)
+                delta_d_zlk[:, :] /= z_bin.size
+                if MPI_rank == 0:
+                    tag = './Output/{}/transfer_{}_d_l100_z2.pkl'.format(N_bins,i)
+                    with open(tag, 'wb') as handle:
+                        pickle.dump(delta_d_zlk[:, :], handle,
+                            protocol=pickle.HIGHEST_PROTOCOL)
         if MPI_rank == 0:
             print('Bin done')
 
@@ -304,14 +314,12 @@ def run_camb(lmax=300, N_bins=4,pol='both',input='camb'):
     transfer_ksz['redshift'] = z
     transfer_ksz['ells'] = ells
     if input=='sync':
-        tag = './Output/transfer_300_sync_{}.pkl'.format(N_bins)
+        tag = './Output/{}/transfer_300_sync_{}.pkl'.format(N_bins)
     elif input=='new':
         tag = './Output/transfer_300_new_{}.pkl'.format(N_bins)
     else:
-        tag = './Output/transfer_300_b_{}.pkl'.format(N_bins)
-   
+        tag = './Output/{}/transfer_l100_z2.pkl'.format(N_bins)
     if MPI_rank == 0:
-        print(transfer_ksz['density'][0,0,:100] )
         with open(tag, 'wb') as handle:
             pickle.dump(transfer_ksz, handle,
                         protocol=pickle.HIGHEST_PROTOCOL)
@@ -335,6 +343,6 @@ except(IndexError):
     input = 'camb'
 
     
-run_camb(lmax=300, N_bins=N_bins,pol=pol,input=input)
+run_camb(lmax=100, N_bins=N_bins,pol=pol,input=input)
 
 

@@ -4,17 +4,17 @@ import camb
 from camb import model
 
 # Define functions needed for to calculate the redshift/comoving distances at which we need the transfer function
-def Chi_bin_boundaries(z_min, z_max, pars, data, N):
+def Chi_bin_boundaries(z_min, z_max, pars, data, N_bins):
     """
     Get comoving distances (chi) of boundaries of N bins from z_min to z_max,
     equally spaced in comoving distance
     """
     Chi_min = data.comoving_radial_distance(z_min)
     Chi_max = data.comoving_radial_distance(z_max)
-    Chi_boundaries = np.linspace(Chi_min, Chi_max, N + 1)
+    Chi_boundaries = np.linspace(Chi_min, Chi_max, N_bins + 1)
     return Chi_boundaries
 
-def Chi_bin_centers(z_min, z_max, pars, data, N):
+def Chi_bin_centers(z_min, z_max, N):
     """
     Get comoving distances at center of of bins from Chi_bin_boundaries()
     """
@@ -51,9 +51,9 @@ def Z_bin_samples(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, data, pars):
     return z_samples
 
 # Set parameters and run CAMB
-acc_opts = dict(AccuracyBoost=10,
+acc_opts = dict(AccuracyBoost=3,
                 lSampleBoost=50,
-                lAccuracyBoost=7,
+                lAccuracyBoost=3,
                 DoLateRadTruncation=False)
 
 pars = camb.CAMBparams()
@@ -72,44 +72,20 @@ pars.InitPower.set_params(ns=0.9665,
 pars.set_accuracy(**acc_opts)
 pars.set_dark_energy()
 pars.NonLinear = model.NonLinear_none
-
-k_acc = 2
-pars.Accuracy.SourcekAccuracyBoost =k_acc
-pars.Accuracy.IntkAccuracyBoost = k_acc
-pars.Accuracy.BesselBoost = k_acc 
-
-pars.set_accuracy(**acc_opts)
-pars.set_dark_energy()
-pars.NonLinear = model.NonLinear_none
-k_eta_fac=10
-lmax=300
-max_eta_k = k_eta_fac * lmax
-max_eta_k = max(max_eta_k, 50000)
-
-pars.max_l = lmax+700
-pars.max_eta_k = max_eta_k
-pars.max_l_evolve = lmax * 10   # NOt sure if that does anything at all
-
-pars.AccurateBB = True
-pars.AccurateReionization = True
-pars.AccuratePolarization = True
-
-#Increase lmax to improve fit for ells close to lmax
-pars.set_for_lmax(7000)
 data = camb.get_background(pars)
 
 # Load cosmo file to get k and calculate Z
 
-beta_file = './Output/cosmo_301_8_3.pkl'
+beta_file = './k_and_z.pkl'
 pkl_file = open(beta_file, 'rb')
 beta = pickle.load(pkl_file)
 ks = beta['k']
 print('Number of k-samples:  {}'.format(ks.size))
 z_min = 0.2
-z_max = 3
+z_max = 2
 N_bins = 1
 Bin_num = 0
-N_samples_in_bin = np.int(240 * 8 )
+N_samples_in_bin = np.int(20000)
 z_samples = Z_bin_samples(z_min, z_max, N_bins, Bin_num, N_samples_in_bin, data, pars)
 
 print('Number of z - samples between z_min={} and z_max={}:  {}'.format(z_min,z_max,z_samples.size))
@@ -122,9 +98,13 @@ with open('k_and_z.pkl', 'wb') as handle:
     pickle.dump(out, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 # Calculate the transfer function for matter and velocity
-
+N = 50
+Ns = int(ks.size/N)
 etas = data.conformal_time(0.0) - data.comoving_radial_distance(z_samples)
-transfer = data.get_time_evolution(ks, etas, ['delta_cdm','v_newtonian_cdm'])
-with open('transfer_delta_v_camb.pkl', 'wb') as handle:
-    pickle.dump(transfer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+for i in range(N+1):
+    print(i)
+    transfer = data.get_time_evolution(ks[Ns*i:Ns*(i+1)], etas, ['delta_tot','v_newtonian_cdm'])
+    
+    with open('Output/transfer_delta_v_camb_{}.pkl'.format(i), 'wb') as handle:
+       pickle.dump(transfer, handle, protocol=pickle.HIGHEST_PROTOCOL)
 

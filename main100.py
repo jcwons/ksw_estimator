@@ -7,7 +7,7 @@ import pywigxjpf as wig
 import pickle
 import os
 import sys
-import ksz
+# import ksz
 # import bispectrum
 import itertools
 import timeit
@@ -25,18 +25,11 @@ def get_ksz_radii():
     """
 
     # booster increases the number of samples points
-    booster = 5
+    booster = 1
     vlow = np.linspace(0, 10, num=booster * 10, dtype=float, endpoint=False)
-    ksz1 = np.linspace(10, 2000, num=booster * 80, dtype=float, endpoint=False)
-    ksz2 = np.linspace(2000, 6000, num=booster * 300, dtype=float, endpoint=False)
-    ksz3 = np.linspace(6000, 9377, num=booster * 200, dtype=float, endpoint=False)
-    re1 = np.linspace(9377, 10007, num=booster * 18, dtype=float, endpoint=False)
-    re2 = np.linspace(10007, 12632, num=booster * 25, dtype=float, endpoint=False)
-    rec = np.linspace(12632, 13682, num=booster * 50, dtype=float, endpoint=False)
-    rec_new = np.linspace(13682, 15500, num=booster * 300, dtype=float, endpoint=False)
-    rec_extra = np.linspace(15500, 30000, num=booster * 50, dtype=float, endpoint=False)
+    ksz = np.linspace(10, 8000, num=booster * 7200, dtype=float, endpoint=False)
 
-    radii = np.concatenate((vlow, ksz1, ksz2, ksz3, re1, re2, rec, rec_new, rec_extra))
+    radii = np.concatenate((vlow, ksz))
     return radii
 
 
@@ -97,9 +90,14 @@ def local_shape(beta_s, ell1, ell2, ell3, lmin, p1, p2, p3):
 def equil_shape(beta_s, ell1, ell2, ell3 ,lmin, p1, p2, p3):
     # equilateral, orthogonal and flattened shape consist of same shape functions, but with different prefactors
     # a: alpha, b: beta, g: gamma, d: delta
-    bba = 0
-    ddd = 0
-    bdg = 1.
+    # eq: -1,-2,+1
+    # or: +1, +3, -1
+    # fo: -3, -8, +3
+    
+    
+    bba = 1.
+    ddd = 3.
+    bdg = -1.
 
     # bba
     shape = bba * local_shape(beta_s, ell1, ell2, ell3, lmin, p1, p2, p3) / 2 # local shape has 2 factor
@@ -131,6 +129,7 @@ class PreCalc:
         self.invcov = {}
         self.ksz = {}
         self.delta = {}
+        self.transfer = {}
 
         self.comm = MPI.COMM_WORLD
         self.mpi_rank = self.comm.Get_rank()  # Assigns every core a rank (integer value)
@@ -151,74 +150,29 @@ class PreCalc:
         # Until which point ksz modes are included
         self.cutoff_ksz = 100
 
-    def init_planck_setting(self, ):
-        self.beam = 5  # in arcmin
-        self.noise = 40  # in muK * arcmin
-        self.lmin = 2
-        # self.fsky = 0.75
-
-    def init_CMBS4_setting(self, ):
-        self.beam = 1  # in arcmin
-        self.noise = 1  # in muK * arcmin
-        self.lmin = 30
-        # self.fsky = 0.40
+        pkl_file = open('k_and_z.pkl', 'rb')
+        kz = pickle.load(pkl_file)
+        self.k = kz['k']
+        self.z = kz['z']
 
     def printmpi(self, text):
         if self.mpi_rank == 0:
             print(text, flush=True)
 
-    def init_cosmo(self, lmax, AccuracyBoost=1, kSampling=1):
-        """
-        Collect transfer functions and cls to save in self.cosmo
-        1) Run CAMB and get T,E,B
-        2) Read in transfer and cls from kSZ and pSZ
-        """
-        cosmo_file = path + '/cosmo_{}_8_3.pkl'.format(301)
-        # cosmo_file = path + '/cosmo_300_8_3.pkl'
-        # cosmo_file = path + '/Tests/cosmo_{}_2b_3k.pkl'.format(lmax - 100)
-        # cosmo_file = path + '/cosmo.pkl'
-        recompute_cosmo = False
-        if self.mpi_rank == 0:
-            try:
-                pkl_file = open(cosmo_file, 'rb')
-            except IOError:
-                print('{} not found'.format(cosmo_file))
-                recompute_cosmo = True
-            else:
-                print('loaded cosmo from {}'.format(cosmo_file))
-                self.cosmo = pickle.load(pkl_file)
-                pkl_file.close()
-        # Tell all ranks if file was found
-        recompute_cosmo = self.comm.bcast(recompute_cosmo, root=0)
-        if self.mpi_rank == 0:
-            self.cosmo['scalar'] = self.cosmo['scalar'][:2, :lmax, :]
-        if recompute_cosmo is False:
-            self.cosmo = self.comm.bcast(self.cosmo, root=0)
-
-        if recompute_cosmo:
-            self.printmpi('Runnnig CAMB for transfer, k, ells and cls ')
-            transfer, cls = cs.run_camb(lmax=lmax, lSampleBoost=50, AccuracyBoost=AccuracyBoost, kSampling=kSampling)
-            self.cosmo['transfer'] = transfer
-            self.cosmo['cls'] = cls
-            if self.mpi_rank == 0:
-                print('Storing cosmo as: {}'.format(cosmo_file))
-                # Store in pickle file.
-                with open(cosmo_file, 'wb') as handle:
-                    pickle.dump(self.cosmo, handle,
-                                protocol=pickle.HIGHEST_PROTOCOL)
-            self.printmpi('Computed cosmo')
-        self.printmpi(self.cosmo['scalar'][0, 0, :])
-    def init_ksz(self, lmax, ze, N_bins, AccuracyBoost=2):
+    def init_transfer(self, lmax, N_bins):
         """
         Collect transfer functions and cls to save in self.ksz
         ze currently not used. file name is what determines number of bins and everything
         Precalculate ksz and use correct file name
         """
-        self.N_bins = N_bins
-        ksz_file = path + '/transfer_300_b_{}.pkl'.format(N_bins)
-        recompute_ksz = False
-        #if self.mpi_rank == 0:
-        if True:
+        self.printmpi(self.pols)
+        for i in self.pols:
+            self.transfer[i] = {}
+            self.N_bins = N_bins
+            if i < N_bins:
+                ksz_file = path + '/{}/transfer_{}_d_l100_z2.pkl'.format(N_bins, i)
+            else:
+                ksz_file = path + '/{}/transfer_100_n{}_b{}.pkl'.format(N_bins, N_bins, i-N_bins)
             try:
                 pkl_file = open(ksz_file, 'rb')
             except IOError:
@@ -228,72 +182,21 @@ class PreCalc:
                 self.printmpi('loaded ksz from {}'.format(ksz_file))
                 self.ksz['transfer'] = pickle.load(pkl_file)
                 pkl_file.close()
-        if self.mpi_rank == 0:
-            print(self.ksz['transfer']['velocity'].shape)
-        self.ksz['transfer']['velocity'] = self.ksz['transfer']['velocity'][:, :lmax, :]
-        delta_temp = self.ksz['transfer']['density'][:, :lmax, :]
-        self.delta['transfer'] = {'density': delta_temp} 
-        # Tell all ranks if file was found
-        recompute_ksz = self.comm.bcast(recompute_ksz, root=0)
-#        self.ksz = self.comm.bcast(self.ksz, root=0)
-#        self.delta = self.comm.bcast(self.delta, root=0)
-        if recompute_ksz:
-            self.printmpi('Runnnig CAMB for transfer, k, ells and cls ')
-            transfer = ksz.run_camb(lmax=lmax, ze=ze, AccuracyBoost=AccuracyBoost)
-            self.ksz['transfer'] = transfer
-            if self.mpi_rank == 0:
-                print('Storing ksz as: {}'.format(ksz_file))
-                # Store in pickle file.
-                with open(ksz_file, 'wb') as handle:
-                    pickle.dump(self.ksz, handle,
-                                protocol=pickle.HIGHEST_PROTOCOL)
-            self.printmpi('Computed ksz')
 
-    def init_delta(self, lmax, ze, N_bins, AccuracyBoost=2):
-        """
-        Collect transfer functions and cls to save in self.ksz
-        ze currently not used. file name is what determines number of bins and everything
-        Precalculate ksz and use correct file name
-        """
-        self.N_bins = N_bins
-        # ksz_file = path + '/transfer_300_b_{}.pkl'.format(N_bins)
-        delta_file = path + '/transfer_300_sync_{}.pkl'.format(N_bins)
-        recompute_delta = False
-#        if self.mpi_rank == 0:
-        if True:
-            try:
-                pkl_file = open(delta_file, 'rb')
-            except IOError:
-                self.printmpi('{} not found'.format(delta_file))
-                recompute_ksz = True
+            if i < N_bins:
+                self.transfer[i] = self.ksz['transfer'][:100,:]
+                # Option above used to make problems, if still not working use option below
+#                self.transfer = {i: {'density': self.ksz['transfer']['density']}}
             else:
-                self.printmpi('loaded delta from {}'.format(delta_file))
-                self.delta['transfer'] = pickle.load(pkl_file)
-                pkl_file.close()
-        # Tell all ranks if file was found
-        self.delta['transfer']['density'] = self.delta['transfer']['density'][:, :lmax, :]
-        recompute_delta = self.comm.bcast(recompute_delta, root=0)
-#        self.delta = self.comm.bcast(self.delta, root=0)
-
-        if recompute_delta:
-            self.printmpi('Runnnig CAMB for transfer, k, ells and cls ')
-            transfer = ksz.run_camb(lmax=lmax, ze=ze, AccuracyBoost=AccuracyBoost)
-            self.delta['transfer'] = transfer
-            if self.mpi_rank == 0:
-                print('Storing ksz as: {}'.format(delta_file))
-                # Store in pickle file.
-                with open(delta_file, 'wb') as handle:
-                    pickle.dump(self.ksz, handle,
-                                protocol=pickle.HIGHEST_PROTOCOL)
-            self.printmpi('Computed ksz')
-
+                self.transfer[i] = self.ksz['transfer']['velocity']
+            #self.printmpi(self.transfer)
     def alpha_prim(self, k):
         """
         Returns shape function
         For local:  alpha_prim = 1
         """
         if k is None:
-            k = self.cosmo['scalar']['k']
+            k = self.k
         alpha_prim = np.ones(k.size)
         return alpha_prim
 
@@ -311,7 +214,7 @@ class PreCalc:
         ns = 0.965
 
         if k is None:
-            k = self.cosmo['scalar']['k']
+            k = self.k
         km3 = k ** -3
         # Multiply the power spectrum to is As * (k/kp)^(n_s-1)
 
@@ -333,7 +236,7 @@ class PreCalc:
         ns = 0.965
 
         if k is None:
-            k = self.cosmo['scalar']['k']
+            k = self.k
         km3 = k ** -3
         # Multiply the power spectrum scaling: (k/kp)^(n_s-1)
         km3 *= (k / kpivot) ** (ns - 1)
@@ -354,7 +257,7 @@ class PreCalc:
         ns = 0.965
 
         if k is None:
-            k = self.cosmo['scalar']['k']
+            k = self.k
         km3 = k ** -3
         # Multiply the power spectrum scaling: (k/kp)^(n_s-1)
         km3 *= (k / kpivot) ** (ns - 1)
@@ -376,58 +279,36 @@ class PreCalc:
         # radii = get_komatsu_radii()
         radii = get_ksz_radii()
         self.beta['radii'] = radii
-
-        # Check if beta already has been computed
-        if prim_shape == 'local':
-            beta_file = path + '/beta_' + prim_shape + '_{}_{}.pkl'.format(lmax, self.N_bins)
-        else:
-            beta_file = path + '/beta_equil' + '_{}_{}.pkl'.format(lmax, self.N_bins)
-        
-        # beta_file = path + '/beta_' + prim_shape + '_{}.pkl'.format(51)
-        # beta_file = path + '/Debug/beta_test_300.pkl'
-        try:
-            pkl_file = open(beta_file, 'rb')
-            recompute_beta = False
-        except IOError:
-            self.printmpi('{} not found'.format(beta_file))
-            recompute_beta = True
-        else:
-            self.printmpi('loaded beta from {}'.format(beta_file))
-            self.beta = pickle.load(pkl_file)
-            pkl_file.close()
-        # Put this whole computation into a function
-        if recompute_beta:
-            # calculates alpha and beta for ksz until ell=self.cutoff_ksz
-            # recompute always because fast
-            self.compute_beta(radii=radii, ells=ells, prim_shape=prim_shape,
-                              transfer_s=self.ksz['transfer']['velocity'][:, :, :], k=self.cosmo['k'],
-                              mode='ksz')
-            # calculates alpha and beta for delta until ell=self.cutoff_ksz
-            self.compute_beta(radii=radii, ells=ells, prim_shape=prim_shape,
-                              transfer_s=self.delta['transfer']['density'][:, :, :], k=self.cosmo['k'],
-                              mode='delta')
-            # calculates beta for T and E
-            # search if beta file has been calculated before
-            beta_cmb_file = path + '/beta_cmb_' + prim_shape + '_{}.pkl'.format(lmax)
+        for i in self.pols:
+            # Check if beta already has been computed
+            # if prim_shape == 'local':
+            #     beta_file = path + '/{}/beta_{}_l{}_n{}_b{}.pkl'.format(self.N_bins, prim_shape, lmax, self.N_bins, i)
+            # else:
+            #     beta_file = path + '/{}/beta_{}_l{}_n{}_b{}.pkl'.format(self.N_bins, 'equil', lmax, self.N_bins, i)
+            beta_file = path + '/{}/beta_{}_l{}_n{}_b{}.pkl'.format(self.N_bins, 'equil', lmax, self.N_bins, i)
             try:
-                pkl_file = open(beta_cmb_file, 'rb')
+                pkl_file = open(beta_file, 'rb')
+                recompute_beta = False
             except IOError:
-                self.printmpi('{} not found'.format(beta_cmb_file))
-                self.compute_beta(radii=radii, ells=ells, prim_shape=prim_shape,
-                                  transfer_s=self.cosmo['scalar'][:2, :, :], k=self.cosmo['k'],
-                                  mode='CMB')
+                self.printmpi('{} not found'.format(beta_file))
+                recompute_beta = True
             else:
                 self.printmpi('loaded beta from {}'.format(beta_file))
-                self.beta.update(pickle.load(pkl_file))  # load cmb beta file and add to dictionary
+                beta_temp = pickle.load(pkl_file)
                 pkl_file.close()
+            if prim_shape == 'local':
+                for j in beta_temp.keys():
+                    beta_temp[j]=beta_temp[j][:,:2,:]
+            if recompute_beta:
+                if i < N_bins:
+                    self.compute_beta(radii=radii, ells=ells, prim_shape=prim_shape, transfer_s=self.transfer[i], idx=i)
+                else:
+                    self.compute_beta(radii=radii, ells=ells, prim_shape=prim_shape, transfer_s=self.transfer[i]['velocity'], idx=i)
+            self.beta.update(beta_temp)
+            self.printmpi('Done beta bin: {}'.format(i))
+        self.printmpi('Done: beta')
 
-            self.printmpi(self.beta.keys())
-            beta_file = path + '/beta_' + prim_shape + '_{}_{}.pkl'.format(lmax, self.N_bins)
-            with open(beta_file, 'wb') as handle:
-                pickle.dump(self.beta, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            self.printmpi('Done: beta')
-
-    def compute_beta(self, radii, ells, prim_shape, transfer_s, k, mode):
+    def compute_beta(self, radii, ells, prim_shape, transfer_s,idx):
         """
         Computes 2/pi int k^2 dk f(k) j_l(k*r) T_{x,ell}(k)
         Splits calculation among ells
@@ -439,8 +320,7 @@ class PreCalc:
         """
 
         lmax = ells.size + 1
-        n_pol = transfer_s.shape[0]
-        self.printmpi('number of modes is {}'.format(n_pol))
+        k = self.k
         # Get primordial shape function
         if prim_shape == 'local':  # Additional shapes have to be included
             func = np.zeros([2, k.size])
@@ -452,7 +332,6 @@ class PreCalc:
             func[1, :] = self.beta_prim(k)
             func[2, :] = self.gamma_prim(k)
             func[3, :] = self.delta_prim(k)
-
         k2 = k ** 2
         func *= k2
 
@@ -463,7 +342,7 @@ class PreCalc:
         for rank in range(self.mpi_size):
             ells_per_rank.append(ells[rank::self.mpi_size])
         # temporary beta will be combined with all ranks later
-        beta_temp = np.zeros((ells_sub.size, n_pol, np.size(func, 0), radii.size))
+        beta_temp = np.zeros((ells_sub.size, np.size(func, 0), radii.size))
 
         self.printmpi('Compute: beta')
         for lidx, ell in enumerate(ells_sub):
@@ -475,20 +354,12 @@ class PreCalc:
                 jl = spherical_jn(ell, kr)
                 # integrate
                 for sidx, funcs in enumerate(func):
-                    for pidx in range(n_pol):
-                        # stop calculating beta for kSZ if above kSZ
-                        integrand = np.zeros(k.size)
-                        integrand += jl[:]
-                        integrand *= transfer_s[pidx, ell - self.lmin, :]
-                        integrand *= func[sidx, :]
-                        beta_temp[lidx, pidx, sidx, ridx] = trapz(integrand, k)
-            if ell == 1:
-                print(' beta ell=1')
-                print(beta_temp[lidx, 0, :, :])
-                print(ell - self.lmin)
-                print('transfer')
-                print(transfer_s[0, ell - self.lmin, :20])
-
+                    # stop calculating beta for kSZ if above kSZ
+                    integrand = np.zeros(k.size)
+                    integrand += jl[:]
+                    integrand *= transfer_s[ell - self.lmin, :]
+                    integrand *= func[sidx, :]
+                    beta_temp[lidx, sidx, ridx] = trapz(integrand, k)
         beta_temp *= 2 / np.pi
 
         # Move beta if not parallel
@@ -497,9 +368,9 @@ class PreCalc:
         if self.mpi_size > 1:
             if self.mpi_rank == 0:
                 print('Combining beta')
-                beta_full = np.zeros((ells.size, n_pol, np.size(func, 0), radii.size))
+                beta_full = np.zeros((ells.size, np.size(func, 0), radii.size))
                 # Place root beta_temp in beta_full
-                beta_full[ells_per_rank[0] - self.lmin, :, :, :] = beta_temp[:, :, :, :]
+                beta_full[ells_per_rank[0] - self.lmin, :, :] = beta_temp[:, :, :]
             else:
                 beta_full = None
 
@@ -512,117 +383,64 @@ class PreCalc:
                 # Receive beta on root
                 if self.mpi_rank == 0:
                     ell_size = ells_per_rank[rank].size
-                    beta_sub = np.zeros((ell_size, n_pol, np.size(func, 0), radii.size))
+                    beta_sub = np.zeros((ell_size, np.size(func, 0), radii.size))
                     self.comm.Recv(beta_sub, source=rank, tag=rank)
                     print('root received {}'.format(rank))
-                    beta_full[ells_per_rank[rank] - self.lmin, :, :, :] = beta_sub[:, :, :, :]
+                    beta_full[ells_per_rank[rank] - self.lmin, :, :] = beta_sub[:, :, :]
             beta_full = self.comm.bcast(beta_full, root=0)
 
         '''
         Beta dictionary keys:           Example for N_bin = 4
-        0                   T           0       T
-        1                   E           1       E
-        2       - N_bin+1   density     2-5     density
-        N_bin+2 - 2*N_bin+1             6-10    velocity
+        0      - N_bin-1   density     0-3     density
+        N_bin - 2*N_bin-1              4-7    velocity
         '''
         # Put the density beta function into dictionary
-        if mode == 'CMB':
-            beta_file_cmb = path + '/beta_cmb_' + prim_shape + '_{}.pkl'.format(lmax)
-            beta_cmb = {0: beta_full[:, 0, :, :], 1: beta_full[:, 1, :, :]}
-            with open(beta_file_cmb, 'wb') as handle:
-                pickle.dump(beta_cmb, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            self.beta.update(beta_cmb)
+        beta_file_calc = path + '/{}/beta_{}_l{}_n{}_b{}.pkl'.format(self.N_bins, prim_shape, lmax-1, self.N_bins, idx)
+        beta_calc = {}
+        beta_calc[idx] = beta_full
+        with open(beta_file_calc, 'wb') as handle:
+            pickle.dump(beta_calc, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            self.beta.update(beta_calc)
 
-        elif mode == 'delta':
-            beta_file_delta = path + '/beta_delta_' + prim_shape + '_{}.pkl'.format(lmax)
-            beta_delta = {}
-            for i in range(n_pol):
-                beta_delta[i + 2] = beta_full[:, i, :, :]  # first two entries will be from CMB
-            with open(beta_file_delta, 'wb') as handle:
-                pickle.dump(beta_delta, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                self.beta.update(beta_delta)
-
-        # if loop handles naming. ksz index + 2
-        elif mode == 'ksz':
-            beta_file_ksz = path + '/beta_ksz_' + prim_shape + '_{}.pkl'.format(lmax)
-            beta_ksz = {}
-            for i in range(n_pol):
-                beta_ksz[i + 2 + self.N_bins] = beta_full[:, i, :, :]  # first two entries will be from CMB
-            with open(beta_file_ksz, 'wb') as handle:
-                pickle.dump(beta_ksz, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                self.beta.update(beta_ksz)
-
-    def pols_str_to_int(self, pol_opts, n_bins):
+    def pols_str_to_int(self, pol_opts, n_bins, distance):
         # At this part we include number of bins via n_bins. I guess if we have additional bins and not change n_bins
         # we will only use the first 2 bins (2 = default number)
         self.n_bins = n_bins
-        if pol_opts == 'T':
-            pols = np.array([0])
-        elif pol_opts == 'E':
-            pols = np.array([1])
-        elif pol_opts == 'TE':
-            pols = np.array([0, 1])
+        self.distance = distance
+        if pol_opts == 'delta':
+            pols = np.arange(n_bins)
 
-        elif pol_opts == 'delta':
-            pols = np.arange(n_bins) + 2
-        elif pol_opts == 'delta1':
-            pols = np.array([2])
-        elif pol_opts == 'delta2':
-            pols = np.array([3])
-        elif pol_opts == 'delta3':
-            pols = np.array([4])
-        elif pol_opts == 'delta4':
-            pols = np.array([5])
-        elif pol_opts == 'delta5':
-            pols = np.array([6])
-        elif pol_opts == 'delta6':
-            pols = np.array([7])
-        elif pol_opts == 'delta7':
-            pols = np.array([8])
-        elif pol_opts == 'delta8':
-            pols = np.array([9])
+        elif 'delta_' in pol_opts:
+            pols = pol_opts.split('_')[1]
+            if '-' in pols:
+                start = pols.split('-')[0]
+                end = pols.split('-')[1]
+                pols = np.arange(int(start), int(end) + 1) - 1
+                pols = np.ravel(pols)
+            else:
+                pols = int(pols) - 1
 
         elif pol_opts == 'ksz':
-            pols = np.arange(n_bins) + 2 + n_bins
-        elif pol_opts == 'ksz1':
-            pols = np.array([n_bins + 1 + 1])
-        elif pol_opts == 'ksz2':
-            pols = np.array([n_bins + 2 + 1])
-        elif pol_opts == 'ksz3':
-            pols = np.array([n_bins + 3 + 1])
-        elif pol_opts == 'ksz4':
-            pols = np.array([n_bins + 4 + 1])
-        elif pol_opts == 'ksz5':
-            pols = np.array([n_bins + 5 + 1])
-        elif pol_opts == 'ksz6':
-            pols = np.array([n_bins + 6 + 1])
-        elif pol_opts == 'ksz7':
-            pols = np.array([n_bins + 7 + 1])
-        elif pol_opts == 'ksz8':
-            pols = np.array([n_bins + 8 + 1])
+            pols = np.arange(n_bins) + n_bins
 
+        elif 'ksz_' in pol_opts:
+            pols = pol_opts.split('_')[1]
+            if '-' in pols:
+                start = pols.split('-')[0]
+                end = pols.split('-')[1]
+                pols = np.arange(int(start), int(end) + 1) + n_bins - 1
+            else:
+                pols = int(pols) + n_bins - 1
         elif pol_opts == 'deltaksz':
-            pols = np.arange(2 * n_bins) + 2
-        elif pol_opts == 'vd1':
-            pols = np.array([2, n_bins + 1 + 1])
-        elif pol_opts == 'vd2':
-            pols = np.array([3, n_bins + 2 + 1])
-        elif pol_opts == 'all':
-            pols = np.arange(2 * n_bins + 2)
-
-        elif pol_opts == 'Tdelta':
-            pols = np.append(0, np.arange(n_bins) + 2)
-        elif pol_opts == 'Edelta':
-            pols = np.append(1, np.arange(n_bins) + 2)
-        elif pol_opts == 'Tksz':
-            pols = np.append(0, np.arange(n_bins) + 2 + n_bins)
-        elif pol_opts == 'Eksz':
-            pols = np.append(1, np.arange(n_bins) + 2 + n_bins)
+            pols = np.arange(2*n_bins)
         else:
-            print('polarisation not matching any tags. Code will proceed with pol==deltaksz')
-        self.pols = pols
+            print('polarisation input not supported. Use "delta", "ksz"  for all bins. "delta_a" for bin a. "delta_a-b" for bin a-b')
+        pols=np.array([pols])
+        self.pols = np.ravel(pols)
         self.printmpi('number of modes: {}'.format(pols.size))
         self.printmpi('Modes: {}'.format(pols))
+        self.printmpi('Delta bins go from {} to {}'.format(0,n_bins-1))
+        self.printmpi('ksz bins go from {} to {}'.format(n_bins, 2*n_bins-1))
         self.init_pol_triplets()
 
     def init_pol_triplets(self):
@@ -631,62 +449,50 @@ class PreCalc:
         :return:
         """
         pols = self.pols
+        # counts triplets with actual numbers example pol = 3,4,5
+        # trpl: 3,3,3  3,3,4  3,3,5  3,4,3 ...
         pol_trpl = np.array(list(itertools.product(pols, repeat=3)))
-        self.pol_trpl = pol_trpl
+        pol_trpl_norm = np.array(list(itertools.product(np.arange(pols.size), repeat=3)))
 
-        self.pol_state = {}
-        pol_states = np.array(list(itertools.product([0, 1, 2], repeat=3)))
-        for pol in pol_states:
-            pol_trpl_loop = np.array(list(itertools.product(pols, repeat=3)))
-            for i in range(3):
-                if pol[i] == 1:
-                    pol_trpl_loop = pol_trpl_loop[pol_trpl_loop[:, i] > 1]
-                elif pol[i] == 2:
-                    pol_trpl_loop = pol_trpl_loop[pol_trpl_loop[:, i] < 2]
-            self.pol_state[str(pol)] = pol_trpl_loop
+        nearest_neighbour = False # Only keep nearest neighbours, change to False for all polariations
+        neighbours = self.distance # in 3D, nearest: 2, next to nearest 6, 8, 14
+        if nearest_neighbour:
+            self.printmpi(pol_trpl.shape[0] ** 2)
+
+            to_remove = np.zeros(pol_trpl.shape[0])
+            for i in range(pol_trpl.shape[0]):
+                distance = (pol_trpl[i, 0] - pol_trpl[i, 1]) ** 2 + (pol_trpl[i, 0] - pol_trpl[i, 2]) ** 2 + (
+                            pol_trpl[i, 1] - pol_trpl[i, 2]) ** 2
+                if distance > neighbours:
+                    to_remove[i] = 1
+            pol_trpl = pol_trpl[np.where(to_remove == 0)]
+            self.printmpi(pol_trpl.shape[0] ** 2)
+            pol_trpl_norm = pol_trpl_norm[np.where(to_remove == 0)]
+
+        self.pol_trpl = pol_trpl
+        # trpl_norm: 0,0,0  0,0,1  0,0,2  0,1,0 ...
+        self.pol_trpl_norm = pol_trpl_norm
+
 
     def init_invcov_from_transfer(self, pols, density_cutoff=0, ksz_cutoff=-1):
         """
         Calculates the inverted cls from transfer fcts
-        First calculates cls then inverts using np.linalg.pinv
+        First calculates cls then inverts using np.linalg.inv
 
 
         :param pols: array int
         :return:invcov(ells_sub.size, len(pol_opts), len(pol_opts))
                 containing inverse cls
         """
-        # Note for large number of bins:
-        # cls matrix will get rather large for O(10) modes. It might be smarter to split into two different matrices
-        # one containing all modes until self.cutoff_ksz and the other for larger ell containing only T and E
-
         # Get transfer, ells and k from dict
         ells = self.ells
-        k = self.ksz['transfer']['k']
-        # Load T,E transfer functions as they are
-        transfer_cmb = self.cosmo['scalar'][:2, :, :]  # lmax is 100 higher, remove B pol
-        # create array for ksz as T,E with n_bins
-        transfer_ksz = np.zeros([self.N_bins, transfer_cmb.shape[1], transfer_cmb.shape[2]])
-        # Add ksz transfer functions, have other entries 0 (different lmax)
-        transfer_ksz[:, :self.ksz['transfer']['velocity'].shape[1], :] = self.ksz['transfer']['velocity'][:,
-                                                                         self.lmin - 1:, :]
-        # create array for delta as T,E with n_bins
-        transfer_delta = np.zeros([self.N_bins, transfer_cmb.shape[1], transfer_cmb.shape[2]])
-        transfer_delta[:, :self.delta['transfer']['density'].shape[1], :] = self.delta['transfer']['density'][:,
-                                                                          self.lmin - 1:, :]
-
-        # if different k has been used for cmb and ksz, error will pop up
-        transfer_temp = np.zeros([2 * self.N_bins + 2, transfer_cmb.shape[1], transfer_cmb.shape[2]])
-        transfer_temp[0:2, :, :] = transfer_cmb
-        transfer_temp[2:self.N_bins + 2, :, :] = transfer_delta
-        transfer_temp[self.N_bins + 2:, :, :] = transfer_ksz
-
-        # Only get the requested polarisations. Set the rest to 0
-        transfer = np.zeros_like(transfer_temp)
-        transfer[pols, :, :] = transfer_temp[pols, :, :]
-        # Create all duplets of polarisation
-        # T : 0     E : 1
-        # B1: 2     B2: 3
-
+        k = self.k
+        # Combine transfer dictionary into array
+        transfer = np.zeros([self.pols.size, ells.size, k.size])
+        for idx, i in enumerate(self.pols):
+            #print(self.transfer[i].shape)
+            #print(transfer[idx, :, :].shape)
+            transfer[idx, :, :] = self.transfer[i]
         n_pol = transfer.shape[0]
         pol_dup = np.array(list(itertools.product(range(n_pol), repeat=2)))
         # (0,0) (0,1) (0,2) ...
@@ -697,33 +503,31 @@ class PreCalc:
         cls = np.zeros((ells.size, n_pol, n_pol))
         for i, j in pol_dup:
             for lidx, ell in enumerate(ells):
-                if (ell > self.cutoff_ksz and i > 1) or (ell > self.cutoff_ksz and j > 1):
-                    continue
-                else:
-                    I = 4 * np.pi / k * transfer[i, lidx, :] * transfer[j, lidx, :] * P_R
-                    cls[lidx, i, j] = simps(I, k)
-        # print(ells.shape)
-        # print(cls.shape)
+                I = 4 * np.pi / k * transfer[i, lidx, :] * transfer[j, lidx, :] * P_R
+                cls[lidx, i, j] = simps(I, k)
         cls_txt = ells
         for i in range(n_pol):
             cls_txt = np.column_stack([cls_txt, cls[:, i, i]])
             # print(cls_txt.shape)
         np.savetxt('cls.txt', cls_txt)
-        # Add option for noise here
-        # cls = self.add_noise_ksz(cls)
-
         # delta lmin is implemented by hand at this point removing all density cls up to lmin 
         self.delta_lmin = density_cutoff
-        cls[:self.delta_lmin, 2:self.N_bins+2, :] = 0        
-        cls[:self.delta_lmin,: , 2:self.N_bins+2] = 0
-        
+        cls[:self.delta_lmin, :self.N_bins, :] = 0
+        cls[:self.delta_lmin, :, :self.N_bins] = 0
+        # similar ksz_lmax
         self.ksz_lmax = ksz_cutoff
-        cls[self.ksz_lmax:, self.N_bins+2:, :] = 0
-        cls[self.ksz_lmax:, :, self.N_bins+2:] = 0
+        cls[self.ksz_lmax:, self.N_bins:, :] = 0
+        cls[self.ksz_lmax:, :, self.N_bins:] = 0
         
-        # print(cls[:3,:,:])
+
         # Invert Cls to get inverse covariance matrix
-        invcov = invert_sparse(cls_sparse=cls, pols=self.pols, ells=ells)
+        # invcov = invert_sparse(cls_sparse=cls, pols=self.pols, ells=ells)
+        invcov = np.zeros_like(cls)
+        for lidx, ell in enumerate(ells):
+            try:
+                invcov[lidx, :, :] = np.linalg.inv(cls[lidx, :, :])
+            except(np.linalg.LinAlgError):
+                invcov[lidx, :, :] = np.linalg.pinv(cls[lidx, :, :])
         for i in range(n_pol):
             cls_txt = np.column_stack([cls_txt, invcov[:, i, i]])
             # print(cls_txt.shape)
@@ -731,12 +535,9 @@ class PreCalc:
         # I think we don't need the dicts afterwards, can save some memory
         # Especially when every Core loads one copy
         self.invcov['invcov'] = invcov
-        # pretty sure we don't use the cls afterwards
-        # self.invcov['cls'] = cls
         self.invcov['ells'] = ells
 
-        self.cosmo.clear()
-        self.ksz.clear()
+        self.transfer.clear()
 
     def init_bispec(self, shape='local', output_name='/fnl_lmax.txt', polarisation='T'):
         """
@@ -750,35 +551,6 @@ class PreCalc:
         self.compute_bispec(ells=ells, beta_s=self.beta, radii=radii, shape=shape, output_name=output_name)
         sys.stdout.flush()
 
-    def add_noise_ksz(self, cls):
-        """
-        Not used at the moment, but should be called before inverting the matrix
-        I feel this should be further up in the code
-        :param cls:
-        :return:
-        """
-        nls = np.loadtxt("Compare/noise_vvold120.txt")
-        nls = nls[2:, :]
-        nls = np.append(nls, nls[-1:, :], axis=0)
-        print(nls.shape)
-        print(cls.shape)
-        for idx, i in enumerate([-2, -1]):
-            cls[:, i, i] = cls[:, i, i] + nls[:, idx]
-        return cls
-
-    def add_noise(self, cls, ells, noise_T, noise_E, beam):
-        """
-        adding noise to the Cls
-        Cls.shape= (4,lmax)
-        assuming no noise for off diagonal elemets (i.e. TE)
-        :return: cls with noise on the diagonal
-        """
-        arc2rad = np.pi / 180 / 60
-        Nls = np.zeros_like(cls)
-        Nls[0, :] = (noise_T * arc2rad) ** 2 * np.exp(ells * (ells + 1) * (beam * arc2rad) ** 2 / (8 * np.log(2)))
-        Nls[1, :] = (noise_E * arc2rad) ** 2 * np.exp(ells * (ells + 1) * (beam * arc2rad) ** 2 / (8 * np.log(2)))
-        cls += Nls  # Add noise for T and E
-
     def compute_bispec(self, ells, beta_s, radii, shape, output_name):
         """
         :param ells: array of integers from lmin to lmax
@@ -787,16 +559,16 @@ class PreCalc:
         :param shape: string, default=local
         :param output_name: string
         :return:
+
+        Calls the function to calculate the bispectrum and then combines
+        There used to be different implementation (basic, cython, prewig), but now only prewig is implemented
+        Could switch back to basic because up to ell=100 wigner doesn't take much time, but no need
         """
         self.printmpi('Compute bispectrum')
         fnl_file = path + '/' + output_name
 
         # Distribute ells for even work load, large ell are slower
         lmin = self.lmin  # call lmin from init, default=2
-        ells = np.arange(lmax)+1
-        #ells = np.arange(30)+1
-        # ells = self.ells
-        self.printmpi(ells)
         ells_per_rank = []
         ells_sub = ells[self.mpi_rank::self.mpi_size]
 
@@ -806,23 +578,12 @@ class PreCalc:
 
         fisher_sub = np.zeros((ells_sub.size))
         pol_trpl = self.pol_trpl
-        #        invcov = self.invcov['invcov']
-
-        # Clear dictionaries to free memory
-        # self.invcov.clear()
-        self.ksz.clear()
-        self.cosmo.clear()
-
-        # introduce lmin for density field
-        # self.delta_lmin = 10
-        # self.invcov['invcov'][:self.delta_lmin, 2:self.N_bins+2, 2:self.N_bins+2] = 0
-
+        invcov = self.invcov['invcov']
         # Calculation performed in Cython. See bispectrum.pyx
         # bispectrum.compute_bispec(ells_sub, radii, beta_s, invcov, fisher_sub, pol_trpl, self.mpi_rank, shape, lmin)
         # self.compute_bispec_python(ells_sub, radii, beta_s, invcov, fisher_sub, pol_trpl, self.mpi_rank, shape, lmin)
 
-        self.compute_bispec_wig_pre(ells_sub, radii, beta_s, self.invcov['invcov'], fisher_sub, pol_trpl, self.mpi_rank,
-                                    shape, lmin)
+        self.compute_bispec_wig_pre(ells_sub, radii, beta_s, invcov, fisher_sub, pol_trpl, self.mpi_rank, shape, lmin)
 
         # fisher has been calculated at all ranks and is now being combined
         fisher_full = fisher_sub
@@ -846,28 +607,31 @@ class PreCalc:
                     ell_size = ells_per_rank[rank].size
                     fisher_sub = np.zeros(ell_size)
                     self.comm.Recv(fisher_sub, source=rank, tag=rank)
-                    print('root received fisher{}'.format(rank))
+                    # print('root received fisher{}'.format(rank))
                     fisher_full[ells_per_rank[rank] - lmin] = fisher_sub
             fisher_full = self.comm.bcast(fisher_full, root=0)
         self.printmpi('Done: fisher')
         # saving output
+        if self.mpi_rank == 0:
+            fnl_end = np.sum(fisher_full)
+            fnl_end = 1 / np.sqrt(fnl_end)
 
-        fnl_end = np.sum(fisher_full)
-        fnl_end = 1 / np.sqrt(fnl_end)
-
-        fnl_max = np.zeros_like(fisher_full)
-        for idx, item in enumerate(fisher_full):
-            fnl_max[idx] = item + fnl_max[idx - 1]
-        if self.mpi_rank==0:
+            fnl_max = np.zeros_like(fisher_full)
+            for idx, item in enumerate(fisher_full):
+               fnl_max[idx] = item + fnl_max[idx - 1]
             fnl_max = 1 / np.sqrt(fnl_max)
+            self.printmpi(fnl_end)
             np.savetxt(fnl_file, np.column_stack([ells, fnl_max]))
-        self.printmpi(fnl_end)
+
 
     def compute_bispec_wig_pre(self, ells_sub, radii, beta_s, invcov, fisher_sub, pol_trpl, rank, shape, lmin):
         """
         Actual calculation of the bispectrum happens here
         Cutoff is implemented in here as well.
         """
+        pol_trpl_inv = self.pol_trpl_norm
+        self.printmpi(pol_trpl)
+        self.printmpi(pol_trpl_inv)
         r2 = radii ** 2
         # Initialising some integers
         lidx3 = 0
@@ -903,16 +667,12 @@ class PreCalc:
 
                     delta_123 = delta_l1l2l3(ell3, ell2, ell1)  # save here because ells don't change
                     # combine different bispectra
-                    for i in range(pol_trpl.shape[0]):
-                        for j in range(pol_trpl.shape[0]):
+                    for i in range(pol_trpl_inv.shape[0]):
+                        for j in range(pol_trpl_inv.shape[0]):
                             fis = bispec[i] * bispec[j] * gaunt
-                            # print(ell1,ell2,ell3)
-                            # print(fis)
-                            # print(invcov[ell2 - lmin, :,:])
-                            fis *= invcov[ell1 - lmin, pol_trpl[i, 2], pol_trpl[j, 2]]  # pol_trpl[,2] = pidx1
-                            # print(invcov[ell1 - lmin, pol_trpl[i, 2], pol_trpl[j, 2]],invcov[ell2 - lmin, pol_trpl[i, 1], pol_trpl[j, 1]],invcov[ell3 - lmin, pol_trpl[i, 0], pol_trpl[j, 0]])
-                            fis *= invcov[ell2 - lmin, pol_trpl[i, 1], pol_trpl[j, 1]]
-                            fis *= invcov[ell3 - lmin, pol_trpl[i, 0], pol_trpl[j, 0]]
+                            fis *= invcov[ell1 - lmin, pol_trpl_inv[i, 2], pol_trpl_inv[j, 2]]  # pol_trpl[,2] = pidx1
+                            fis *= invcov[ell2 - lmin, pol_trpl_inv[i, 1], pol_trpl_inv[j, 1]]
+                            fis *= invcov[ell3 - lmin, pol_trpl_inv[i, 0], pol_trpl_inv[j, 0]]
                             fis /= delta_123
                             fisher += fis
                     idx += 1
@@ -950,26 +710,23 @@ try:
     ksz_cutoff = int(sys.argv[7])
 except(IndexError):
     ksz_cutoff = int(-1)
+try:
+    distance = int(sys.argv[8])
+except(IndexError):
+    distance = int(0)
 # This needs to be called in a different way
 F = PreCalc()
 # F.init_planck_setting()
 # F.init_CMBS4_setting()
 
-ze = [0.2, 3]
-# N_bins = 1
 
 # Calculate CMB and ksz data
-F.init_cosmo(lmax=lmax, kSampling=12)  # Actually only calculates to lmax - 100
-F.init_ksz(lmax=lmax, ze=ze, N_bins=N_bins)
-#F.init_delta(lmax=lmax, ze=ze, N_bins=N_bins)
+# Polarisation input transformed into array. Decides which bins to load.
+F.pols_str_to_int(polarisation, N_bins, distance)
+# Get the requested transfer functions from file
+F.init_transfer(lmax=lmax, N_bins=N_bins)
+# Get/calculate the requested beta functions
 F.init_beta(lmax=lmax, prim_shape=prim_shape, N_bins=N_bins)
-# Polarisation input transformed into array. Also gets pol_trpl for later
-'''
-This needs to be done in a nicer way. At the moment, the number of bins is hard coded. We should be able to get the 
-number of bins from ksz file. Technically, we want to input the number of bins into the ksz file, but currently the
-calculation happens separately.
-'''
-F.pols_str_to_int(polarisation, N_bins)
 # Get invcov. Will need to add noise here probably
 F.init_invcov_from_transfer(F.pols, density_cutoff=density_cutoff, ksz_cutoff=ksz_cutoff)
 # Final calculating the fisher matrix element
